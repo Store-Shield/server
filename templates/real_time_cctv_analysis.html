@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 CCTV 분석</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .container {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+        
+        .content-wrapper {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        /* CCTV 컨테이너 - 왼쪽 배치 */
+        .cctv-container {
+            width: 70%;
+            position: relative;
+            padding: 0;
+            text-align: center;
+            background-color: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .cctv-feed {
+            width: 100%;
+            height: 90%;
+            max-width: 600px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: transparent;
+        }
+
+        .cctv-feed img {
+            width: 100%;
+            height: 100%;
+            object-fit: fill; /* 비율 유지 */
+            display: block;
+        }
+
+        .cctv-label {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+        
+        /* 고객 정보 컨테이너 - 오른쪽 배치 */
+        .customers-container {
+            width: 50%;
+            padding: 15px;
+            overflow-y: auto; /* 세로 스크롤 */
+            height: calc(100vh - 60px); /* 헤더 높이 제외 */
+        }
+        
+        .customers-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .customer-card {
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            position: relative;
+            transition: transform 0.2s;
+        }
+        
+        .customer-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .customer-card.payment {
+            background-color: #e8f5e9;
+        }
+        
+        .customer-card.completed {
+            background-color: #e3f2fd;
+        }
+        
+        .customer-card.theft {
+            background-color: #ffebee;
+            border: 1px solid #ef9a9a;
+        }
+        
+        .customer-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin: 0 auto 10px;
+            background-color: #eee;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: bold;
+            color: #555;
+            border: 2px solid #ddd;
+        }
+        
+        .customer-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .customer-info {
+            margin-left: 15px;
+        }
+        
+        .customer-id {
+            font-size: 16px;
+            font-weight: bold;
+            margin: 5px 0;
+            color: #333;
+        }
+        
+        .customer-status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 15px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-top: 3px;
+        }
+        
+        .status-waiting {
+            background-color: #FFF9C4;
+            color: #F57F17;
+        }
+        
+        .status-payment {
+            background-color: #C8E6C9;
+            color: #2E7D32;
+        }
+        
+        .status-completed {
+            background-color: #BBDEFB;
+            color: #1565C0;
+        }
+        
+        .status-theft {
+            background-color: #FFCDD2;
+            color: #C62828;
+        }
+        
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            margin-top: 10px;
+        }
+        
+        .product-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f9f9f9;
+            padding: 5px;
+            border-radius: 5px;
+        }
+        
+        .product-icon {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            margin-bottom: 3px;
+            color: white;
+            font-size: 16px;
+        }
+        
+        .cup-icon {
+            background-color: #F44336;
+        }
+        
+        .book-icon {
+            background-color: #2196F3;
+        }
+        
+        .phone-icon {
+            background-color: #4CAF50;
+        }
+        
+        .product-name {
+            font-size: 11px;
+            margin: 2px 0;
+        }
+        
+        .product-count {
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .no-customers {
+            text-align: center;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            color: #757575;
+        }
+        
+        .connection-status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 8px 12px;
+            border-radius: 20px;
+            color: white;
+            font-weight: bold;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            transition: opacity 0.5s;
+        }
+        
+        @media (max-width: 900px) {
+            .content-wrapper {
+                flex-direction: column;
+            }
+            
+            .cctv-container, .customers-container {
+                width: 100%;
+            }
+            
+            .cctv-container {
+                height: 40vh;
+            }
+            
+            .customers-container {
+                height: calc(60vh - 60px);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>실시간 CCTV 분석 시스템</h1>
+        </div>
+        
+        <div class="content-wrapper">
+            <div class="cctv-container">
+                <div class="cctv-label">CCTV</div>
+                <div class="cctv-feed">
+                    <img id="cctv-image" src="" alt="CCTV 영상을 불러오는 중...">
+                </div>
+            </div>
+            
+            <div class="customers-container">
+                <div class="customers-list" id="customers-list">
+                    <!-- 고객 카드가 여기에 동적으로 추가됩니다 -->
+                    <div class="no-customers" id="no-customers">
+                        <h3>현재 고객이 없습니다</h3>
+                        <p>고객이 등장하면 여기에 표시됩니다</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="connection-status" id="connection-status">연결 중...</div>
+    
+    <script>
+        // Socket.IO 연결
+        const socket = io();
+        const cctvImage = document.getElementById('cctv-image');
+        const customersList = document.getElementById('customers-list');
+        const noCustomersMessage = document.getElementById('no-customers');
+        const connectionStatus = document.getElementById('connection-status');
+        
+        // 연결 상태 관리
+        socket.on('connect', () => {
+            connectionStatus.textContent = '연결됨';
+            connectionStatus.style.backgroundColor = 'rgba(76, 175, 80, 0.8)';
+            setTimeout(() => {
+                connectionStatus.style.opacity = '0';
+            }, 3000);
+        });
+        
+        socket.on('disconnect', () => {
+            connectionStatus.textContent = '연결 끊김';
+            connectionStatus.style.backgroundColor = 'rgba(244, 67, 54, 0.8)';
+            connectionStatus.style.opacity = '1';
+        });
+        
+        // 상태에 따른 스타일 클래스와 텍스트 반환
+        function getStatusInfo(state) {
+            switch(state) {
+                case '결제대기':
+                    return { class: 'status-waiting', text: '결제대기', cardClass: '' };
+                case '결제중':
+                    return { class: 'status-payment', text: '결제중', cardClass: 'payment' };
+                case '결제완료':
+                    return { class: 'status-completed', text: '결제완료', cardClass: 'completed' };
+                case '절도':
+                    return { class: 'status-theft', text: '절도의심', cardClass: 'theft' };
+                default:
+                    return { class: '', text: state, cardClass: '' };
+            }
+        }
+        
+        // 고객 카드 HTML 생성
+        function createCustomerCard(customer) {
+            const statusInfo = getStatusInfo(customer.state);
+            
+            return `
+                <div class="customer-card ${statusInfo.cardClass}" id="customer-${customer.person_id}">
+                    <div class="customer-header">
+                        <div class="customer-avatar">
+                            ${customer.person_id}
+                        </div>
+                        <div class="customer-info">
+                            <h3 class="customer-id">고객 ID: ${customer.person_id}</h3>
+                            <span class="customer-status ${statusInfo.class}">${statusInfo.text}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="product-grid">
+                        <div class="product-item">
+                            <div class="product-icon cup-icon">☕</div>
+                            <div class="product-name">컵</div>
+                            <div class="product-count">X${customer.product1}</div>
+                        </div>
+                        <div class="product-item">
+                            <div class="product-icon book-icon">📚</div>
+                            <div class="product-name">책</div>
+                            <div class="product-count">X${customer.product2}</div>
+                        </div>
+                        <div class="product-item">
+                            <div class="product-icon phone-icon">📱</div>
+                            <div class="product-name">전화기</div>
+                            <div class="product-count">X${customer.product3}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 실시간 업데이트 처리
+        socket.on('update', (data) => {
+            // CCTV 이미지 업데이트
+            if (data.image) {
+                cctvImage.src = `data:image/jpeg;base64,${data.image}`;
+            }
+            
+            // 고객 정보 업데이트
+            if (data.customers) {
+                // 고객이 있는지 확인
+                if (data.customers.length > 0) {
+                    noCustomersMessage.style.display = 'none';
+                    
+                    // 현재 표시된 고객 ID 목록
+                    const currentCustomerIds = Array.from(
+                        document.querySelectorAll('.customer-card')
+                    ).map(card => parseInt(card.id.replace('customer-', '')));
+                    
+                    // 기존 카드 제거
+                    document.querySelectorAll('.customer-card').forEach(card => card.remove());
+                    
+                    // 고객 카드 추가
+                    data.customers.forEach(customer => {
+                        const customerCard = document.createElement('div');
+                        customerCard.innerHTML = createCustomerCard(customer);
+                        customersList.appendChild(customerCard.firstElementChild);
+                        
+                        // 새로 추가된 고객은 하이라이트 효과
+                        if (!currentCustomerIds.includes(customer.person_id)) {
+                            const card = document.getElementById(`customer-${customer.person_id}`);
+                            if (card) {
+                                card.style.animation = 'fadeIn 1s';
+                            }
+                        }
+                    });
+                } else {
+                    // 고객이 없으면 메시지 표시
+                    noCustomersMessage.style.display = 'block';
+                    document.querySelectorAll('.customer-card').forEach(card => card.remove());
+                }
+            }
+        });
+        
+        // 주기적으로 업데이트 요청
+        function requestUpdate() {
+            socket.emit('request_update');
+            setTimeout(requestUpdate, 100); // 0.1초마다 업데이트 요청
+        }
+        
+        // 페이지 로드 시 초기화
+        window.onload = function() {
+            // 초기 고객 목록은 서버에서 페이지 렌더링 시 전달됨
+            const initialCustomers = JSON.parse('{{ customers|tojson|safe }}');
+            
+            if (initialCustomers && initialCustomers.length > 0) {
+                noCustomersMessage.style.display = 'none';
+                initialCustomers.forEach(customer => {
+                    const customerCard = document.createElement('div');
+                    customerCard.innerHTML = createCustomerCard(customer);
+                    customersList.appendChild(customerCard.firstElementChild);
+                });
+            }
+            
+            // 업데이트 요청 시작
+            requestUpdate();
+        };
+    </script>
+</body>
+</html>
