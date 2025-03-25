@@ -19,6 +19,10 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:csedbadmin@localho
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+# 키오스크 위치 정보 저장
+kiosk_request_pending = False
+kiosk_waiting_client = None
+
 
 # 제품 매핑 정의
 PRODUCT_MAPPING = {
@@ -69,6 +73,12 @@ def show():
     return render_template('real_time_cctv_analysis.html', customers=customers_dict)
 
 
+@app.route('/kiosk')
+def kiosk():
+    return render_template('kiosk.html')
+
+
+
 # 웹소켓 연결 이벤트
 @socketio.on('connect')
 def handle_connect():
@@ -91,6 +101,115 @@ def handle_update_request():
             })
     except Exception as e:
         print(f"업데이트 요청 처리 오류: {str(e)}")    
+        
+
+# 키오스크에서 가장 가까운 고객 요청
+@socketio.on('request_nearest_customer')
+def handle_nearest_customer_request(data):
+    global kiosk_request_pending, kiosk_waiting_client
+    try:
+        kiosk_id = data.get('kioskId')
+        print(f"키오스크 {kiosk_id}에서 가장 가까운 고객 요청")
+        
+        # 요청 상태 설정
+        kiosk_request_pending = True
+        kiosk_waiting_client = request.sid
+        
+        # 앱에 키오스크 위치 근처의 고객 요청
+        emit('find_nearest_person', {'kioskId': kiosk_id}, broadcast=True)
+        
+    except Exception as e:
+        print(f"가장 가까운 고객 요청 처리 오류: {str(e)}")
+        emit('customer_info', {'success': False, 'error': str(e)})        
+        
+
+# 앱에서 가장 가까운 고객 ID 수신
+@socketio.on('nearest_person_found')
+def handle_nearest_person(data):
+    global kiosk_request_pending, kiosk_waiting_client
+    try:
+        if kiosk_request_pending and kiosk_waiting_client:
+            person_id = data.get('personId')
+            
+            if person_id:
+                # 해당 고객의 DB 정보 조회
+                customer = CustomerCart.query.filter_by(person_id=person_id).first()
+                
+                if customer:
+                    # 고객 상태를 결제중으로 변경
+                    if customer.state == '결제대기':
+                        customer.state = '결제중'
+                        db.session.commit()
+                    
+                    # 키오스크에 고객 정보 전송
+                    emit('customer_info', {
+                        'success': True,
+                        'customer': customer.to_dict()
+                    }, to=kiosk_waiting_client)
+                else:
+                    # 고객 정보가 없을 경우
+                    emit('customer_info', {
+                        'success': False,
+                        'error': '고객 정보를 찾을 수 없습니다.'
+                    }, to=kiosk_waiting_client)
+            else:
+                # 가까운 고객이 없을 경우
+                emit('customer_info', {
+                    'success': False,
+                    'error': '가까운 고객을 찾을 수 없습니다.'
+                }, to=kiosk_waiting_client)
+            
+            # 요청 상태 초기화
+            kiosk_request_pending = False
+            kiosk_waiting_client = None
+            
+    except Exception as e:
+        print(f"가장 가까운 고객 처리 오류: {str(e)}")
+        if kiosk_waiting_client:
+            emit('customer_info', {'success': False, 'error': str(e)}, to=kiosk_waiting_client)
+        kiosk_request_pending = False
+        kiosk_waiting_client = None        
+        
+# 결제 확인 처리
+@socketio.on('confirm_payment')
+def handle_payment_confirmation(data):
+    try:
+        customer_id = data.get('customerId')
+        
+        if customer_id:
+            # 해당 고객의 DB 정보 조회
+            customer = CustomerCart.query.filter_by(person_id=customer_id).first()
+            
+            if customer:
+                # 고객 상태를 결제완료로 변경
+                customer.state = '결제완료'
+                db.session.commit()
+                
+                # 결제 완료 응답
+                emit('payment_completed', {'success': True})
+                
+                # 실시간 모니터링 화면 업데이트 요청
+                customers = CustomerCart.query.all()
+                customer_data = [c.to_dict() for c in customers]
+                emit('update', {
+                    'image': base64_image,
+                    'customers': customer_data
+                }, broadcast=True)
+            else:
+                emit('payment_completed', {
+                    'success': False,
+                    'error': '고객 정보를 찾을 수 없습니다.'
+                })
+        else:
+            emit('payment_completed', {
+                'success': False,
+                'error': '고객 ID가 제공되지 않았습니다.'
+            })
+            
+    except Exception as e:
+        print(f"결제 확인 처리 오류: {str(e)}")
+        emit('payment_completed', {'success': False, 'error': str(e)})
+        
 # 웹소켓 메시지 수신
 @socketio.on('message')
 def handle_message(message):

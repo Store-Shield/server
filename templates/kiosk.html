@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스마트 키오스크</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background-color: #333;
+            color: white;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .kiosk-screen {
+            width: 100%;
+            max-width: 800px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .checkout-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 15px 35px;
+            font-size: 18px;
+            border-radius: 50px;
+            cursor: pointer;
+            margin: 20px 0;
+            transition: all 0.3s;
+        }
+        
+        .checkout-btn:hover {
+            background-color: #388E3C;
+            transform: scale(1.05);
+        }
+        
+        .checkout-btn.disabled {
+            background-color: #9E9E9E;
+            cursor: not-allowed;
+        }
+        
+        .payment-section {
+            display: none;
+            margin-top: 20px;
+        }
+        
+        .loading-spinner {
+            display: none;
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .customer-info {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+        }
+        
+        .cart-items {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        
+        .cart-items th, .cart-items td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .cart-items th {
+            background-color: #f2f2f2;
+        }
+        
+        .cart-total {
+            font-weight: bold;
+            text-align: right;
+            margin-top: 15px;
+            font-size: 18px;
+        }
+        
+        .confirm-payment-btn {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 50px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s;
+        }
+        
+        .confirm-payment-btn:hover {
+            background-color: #1976D2;
+        }
+        
+        .payment-success {
+            display: none;
+            margin-top: 30px;
+            color: #2E7D32;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .connection-status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 8px 12px;
+            border-radius: 20px;
+            color: white;
+            font-weight: bold;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            transition: opacity 0.5s;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>무인 스마트 키오스크</h1>
+    </div>
+    
+    <div class="container">
+        <div class="kiosk-screen">
+            <h2>결제를 진행하시겠습니까?</h2>
+            <p>카메라가 자동으로 고객님을 인식합니다.</p>
+            
+            <button id="checkout-btn" class="checkout-btn">결제하기</button>
+            
+            <div id="loading-spinner" class="loading-spinner"></div>
+            
+            <div id="customer-info" class="customer-info">
+                <h3>고객 정보</h3>
+                <p id="customer-id">고객 ID: </p>
+                
+                <h4>장바구니 내역</h4>
+                <table class="cart-items">
+                    <thead>
+                        <tr>
+                            <th>상품</th>
+                            <th>수량</th>
+                            <th>가격</th>
+                            <th>소계</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cart-items-body">
+                        <!-- 동적으로 추가됨 -->
+                    </tbody>
+                </table>
+                
+                <div class="cart-total">총 결제금액: <span id="total-amount">0</span>원</div>
+                
+                <button id="confirm-payment-btn" class="confirm-payment-btn">결제 확인</button>
+            </div>
+            
+            <div id="payment-success" class="payment-success">
+                <p>결제가 완료되었습니다!</p>
+                <p>이용해 주셔서 감사합니다.</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="connection-status" id="connection-status">연결 중...</div>
+    
+    <script>
+        // Socket.IO 연결
+        const socket = io();
+        const checkoutBtn = document.getElementById('checkout-btn');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const customerInfo = document.getElementById('customer-info');
+        const customerId = document.getElementById('customer-id');
+        const cartItemsBody = document.getElementById('cart-items-body');
+        const totalAmount = document.getElementById('total-amount');
+        const confirmPaymentBtn = document.getElementById('confirm-payment-btn');
+        const paymentSuccess = document.getElementById('payment-success');
+        const connectionStatus = document.getElementById('connection-status');
+        
+        // 상품 정보 (상품명과 가격)
+        const productInfo = {
+            'product1': { name: '컵', price: 5000 },
+            'product2': { name: '책', price: 15000 },
+            'product3': { name: '전화기', price: 25000 }
+        };
+        
+        // 결제 중인 고객 ID
+        let currentCustomerId = null;
+        
+        // 연결 상태 관리
+        socket.on('connect', () => {
+            connectionStatus.textContent = '연결됨';
+            connectionStatus.style.backgroundColor = 'rgba(76, 175, 80, 0.8)';
+            setTimeout(() => {
+                connectionStatus.style.opacity = '0';
+            }, 3000);
+        });
+        
+        socket.on('disconnect', () => {
+            connectionStatus.textContent = '연결 끊김';
+            connectionStatus.style.backgroundColor = 'rgba(244, 67, 54, 0.8)';
+            connectionStatus.style.opacity = '1';
+        });
+        
+        // 결제하기 버튼 클릭 이벤트
+        checkoutBtn.addEventListener('click', () => {
+            // 버튼 비활성화
+            checkoutBtn.disabled = true;
+            checkoutBtn.classList.add('disabled');
+            
+            // 로딩 스피너 표시
+            loadingSpinner.style.display = 'block';
+            
+            // 서버에 가장 가까운 고객 요청
+            socket.emit('request_nearest_customer', { kioskId: 'kiosk1' });
+        });
+        
+        // 고객 정보 수신
+        socket.on('customer_info', (data) => {
+            // 로딩 스피너 숨기기
+            loadingSpinner.style.display = 'none';
+            
+            // 고객 정보가 있는 경우
+            if (data.success) {
+                currentCustomerId = data.customer.person_id;
+                
+                // 고객 ID 표시
+                customerId.textContent = `고객 ID: ${data.customer.person_id}`;
+                
+                // 장바구니 아이템 생성
+                cartItemsBody.innerHTML = '';
+                let total = 0;
+                
+                // 각 상품 추가
+                Object.keys(productInfo).forEach(productKey => {
+                    const quantity = data.customer[productKey];
+                    if (quantity > 0) {
+                        const product = productInfo[productKey];
+                        const subtotal = product.price * quantity;
+                        total += subtotal;
+                        
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${product.name}</td>
+                            <td>${quantity}</td>
+                            <td>${product.price.toLocaleString()}원</td>
+                            <td>${subtotal.toLocaleString()}원</td>
+                        `;
+                        cartItemsBody.appendChild(row);
+                    }
+                });
+                
+                // 총액 업데이트
+                totalAmount.textContent = total.toLocaleString();
+                
+                // 고객 정보 섹션 표시
+                customerInfo.style.display = 'block';
+            } else {
+                // 고객을 찾지 못한 경우
+                alert('근처에서 고객을 찾을 수 없습니다. 다시 시도해주세요.');
+                checkoutBtn.disabled = false;
+                checkoutBtn.classList.remove('disabled');
+            }
+        });
+        
+        // 결제 확인 버튼 클릭 이벤트
+        confirmPaymentBtn.addEventListener('click', () => {
+            // 결제 확인 요청
+            socket.emit('confirm_payment', { customerId: currentCustomerId });
+            
+            // 결제 확인 버튼 비활성화
+            confirmPaymentBtn.disabled = true;
+            confirmPaymentBtn.classList.add('disabled');
+        });
+        
+        // 결제 완료 응답
+        socket.on('payment_completed', (data) => {
+            if (data.success) {
+                // 고객 정보 숨기기
+                customerInfo.style.display = 'none';
+                
+                // 결제 성공 메시지 표시
+                paymentSuccess.style.display = 'block';
+                
+                // 3초 후 초기 화면으로 리셋
+                setTimeout(() => {
+                    paymentSuccess.style.display = 'none';
+                    checkoutBtn.disabled = false;
+                    checkoutBtn.classList.remove('disabled');
+                    confirmPaymentBtn.disabled = false;
+                    confirmPaymentBtn.classList.remove('disabled');
+                    currentCustomerId = null;
+                }, 3000);
+            } else {
+                alert('결제 처리 중 오류가 발생했습니다. 다시 시도해주세요.');
+                confirmPaymentBtn.disabled = false;
+                confirmPaymentBtn.classList.remove('disabled');
+            }
+        });
+    </script>
+</body>
+</html>
