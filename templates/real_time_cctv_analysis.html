@@ -78,13 +78,13 @@
             z-index: 10;
         }
         
-        /* 고객 정보 컨테이너 - 오른쪽 배치 */
-        .customers-container {
-            width: 50%;
-            padding: 15px;
-            overflow-y: auto; /* 세로 스크롤 */
-            height: calc(100vh - 60px); /* 헤더 높이 제외 */
-        }
+                .customers-container {
+                width: 50%;
+                padding: 15px;
+                overflow-y: auto; /* 세로 스크롤 */
+                height: calc(80vh); /* 헤더 높이(60px)와 하단 여백(20px) 제외 */
+                padding-bottom: 100px; /* 하단에 여백 추가 */
+            }
         
         .customers-list {
             display: flex;

@@ -162,7 +162,7 @@
     <div class="container">
         <div class="kiosk-screen">
             <h2>결제를 진행하시겠습니까?</h2>
-            <p>카메라가 자동으로 고객님을 인식합니다.</p>
+            <p>결제하기 버튼을 클릭하면, 자동으로 선택하신 상품의 결제가 진행됩니다.</p>
             
             <button id="checkout-btn" class="checkout-btn">결제하기</button>
             
@@ -258,7 +258,7 @@
             loadingSpinner.style.display = 'none';
             
             // 고객 정보가 있는 경우
-            if (data.success) {
+            if (data.success==1) {
                 currentCustomerId = data.customer.person_id;
                 
                 // 고객 ID 표시
@@ -292,7 +292,14 @@
                 
                 // 고객 정보 섹션 표시
                 customerInfo.style.display = 'block';
-            } else {
+            }else if(data.success==0){
+                 // 고객은 찾았지만 결제할 품목이 없는 경우
+                currentCustomerId = data.customer.person_id;
+                alert(`${currentCustomerId}님은 결제할 품목이 없습니다.`);
+                checkoutBtn.disabled = false;
+                checkoutBtn.classList.remove('disabled');
+            }
+            else {
                 // 고객을 찾지 못한 경우
                 alert('근처에서 고객을 찾을 수 없습니다. 다시 시도해주세요.');
                 checkoutBtn.disabled = false;

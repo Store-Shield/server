@@ -136,20 +136,27 @@ def handle_nearest_person(data):
                 customer = CustomerCart.query.filter_by(person_id=person_id).first()
                 
                 if customer:
-                    # 고객 상태를 결제중으로 변경
-                    if customer.state == '결제대기':
-                        customer.state = '결제중'
-                        db.session.commit()
-                    
-                    # 키오스크에 고객 정보 전송
-                    emit('customer_info', {
-                        'success': True,
-                        'customer': customer.to_dict()
-                    }, to=kiosk_waiting_client)
+                    if (customer.product1 == 0 and customer.product2 == 0 and customer.product3 == 0):
+                         # 키오스크에 고객 정보 전송 #1이면 정상 0이면 장바구니에 담긴게 없음 -1이면 고객이 찾을 수 없음
+                        emit('customer_info', {
+                            'success': 0,
+                            'customer': customer.to_dict()
+                        }, to=kiosk_waiting_client)
+                    else:
+                        # 고객 상태를 결제중으로 변경
+                        if customer.state == '결제대기':
+                            customer.state = '결제중'
+                            db.session.commit()
+
+                        # 키오스크에 고객 정보 전송 #1이면 정상 0이면 장바구니에 담긴게 없음 -1이면 고객이 찾을 수 없음
+                        emit('customer_info', {
+                            'success': 1,
+                            'customer': customer.to_dict()
+                        }, to=kiosk_waiting_client)
                 else:
                     # 고객 정보가 없을 경우
                     emit('customer_info', {
-                        'success': False,
+                        'success': -1,
                         'error': '고객 정보를 찾을 수 없습니다.'
                     }, to=kiosk_waiting_client)
             else:
@@ -279,9 +286,14 @@ def handle_message(message):
                     # 상품을 가지고 있고 결제완료 상태가 아니면 절도로 표시
                     if (customer.state == '결제대기' and 
     (customer.product1 > 0 or customer.product2 > 0 or customer.product3 > 0)):
-                        customer.state = '절도'
+                        customer.state = '절도의심'
                         db.session.commit()
                         print(f"고객 ID {person_id} 절도 의심")
+                    elif (customer.state == '결제중' and 
+    (customer.product1 > 0 or customer.product2 > 0 or customer.product3 > 0)):
+                        customer.state = '절도의심'
+                        db.session.commit()
+                        print(f"고객 ID {person_id} 절도 의심")    
                     elif customer.state == '결제완료':
                         # 결제 완료된 고객은 DB에서 삭제
                         #db.session.delete(customer)
