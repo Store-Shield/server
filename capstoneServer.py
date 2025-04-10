@@ -62,6 +62,7 @@ def update_window():
         if current_image is not None:
             cv2.imshow("Received Image", current_image)
             cv2.waitKey(1)
+
             
             
 @app.route('/')
@@ -84,6 +85,39 @@ def kiosk():
 def handle_connect():
     print('클라이언트 연결됨')
     
+
+@socketio.on('findPersonFace')
+def handle_find_person_face(data):
+    faces_data = data.get('faces', {})
+    
+    
+    
+    # 문자열 키를 정수로 변환하여 딕셔너리 생성
+    faces = {int(key): value for key, value in faces_data.items()}
+    # 각 사람 ID와 이미지 데이터에 접근
+    for person_id, image_data in faces.items():
+        print(f"사람 ID: {person_id}")
+        
+        # 이미지 데이터 처리 (Base64 문자열일 경우)
+        # 예: Base64 -> 이미지로 변환
+        try:
+            # Base64 이미지 데이터 처리 예시
+            image_binary = base64.b64decode(image_data)
+            nparr = np.frombuffer(image_binary, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            # 창 생성 및 이미지 표시
+            window_name = f"Person ID: {person_id}"
+            resized_image = cv2.resize(image, (500, 500))
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.imshow(window_name, resized_image)
+            cv2.waitKey(1)  # 화면 업데이트를 위해 필요
+            
+            print(f"사람 ID {person_id}의 이미지 처리 완료")
+        except Exception as e:
+            print(f"이미지 처리 오류: {str(e)}")
+        
+        
+
     
 @socketio.on('request_update')
 def handle_update_request():
@@ -253,9 +287,11 @@ def handle_message(message):
             # 클라이언트에 응답 (선택사항)
             emit('response', {'status': 'success'})
         elif data.get('type') == 'personAppearance':
-            timestamp=data.get('timestamp')
-            personIds=data.get('personIds')   
+            timestamp = data.get('timestamp')
+            personIds = data.get('personIds')
+            #thumbnail도 받기
             print(f"{timestamp} 시간에 {personIds} 등장")
+            # 받은 얼굴 이미지 처리 및 표시
             for person_id in personIds:
                 # 이미 존재하는지 확인
                 customer = CustomerCart.query.filter_by(person_id=person_id).first()
@@ -271,7 +307,13 @@ def handle_message(message):
                     db.session.add(new_customer)
                     db.session.commit()
                     print(f"고객 ID {person_id} DB에 추가됨")
-                    
+            
+            emit('requestPersonFaceFind', {'personIds': personIds})
+            print("requestPersonFaceFindt 서버에서 요청")
+                
+                
+            
+            
                     
         elif data.get('type') == 'personDisappearance':
             timestamp=data.get('timestamp')
