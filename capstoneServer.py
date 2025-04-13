@@ -15,6 +15,35 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 current_image = None
 base64_image=None
 
+# 영상 저장을 위한 변수 추가  ===============================================================================================
+recording_active = False
+frame_buffer = []  # 프레임과 타임스탬프 저장
+active_persons = set()
+
+
+# 영상 저장 함수 정의
+def save_person_video(person_id):
+    if not frame_buffer:
+        print(f"{person_id}에 대한 프레임 없음")
+        return
+
+    folder = 'videos'
+    os.makedirs(folder, exist_ok=True)
+    filename = f"{folder}/person_{person_id}_{int(time.time())}.mp4"
+
+    height, width, _ = frame_buffer[0]['image'].shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(filename, fourcc, 15.0, (width, height))
+
+    for item in frame_buffer:
+        out.write(item['image'])
+
+    out.release()
+    print(f"{person_id}에 대한 영상 저장 완료: {filename}")
+# ====================================================================================================================
+
+
+
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:csedbadmin@localhost/cctv_db'#db 연결
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -278,6 +307,16 @@ def handle_message(message):
                 print("이미지 디코딩 실패")
                 return
 
+            # ==========================================================================================================
+            global recording_active, frame_buffer, active_persons
+            timestamp = data.get('timestamp', int(time.time() * 1000))
+
+            # 프레임 저장 로직, 타임스템프와 프레임을 함께 저장하여 나중에 프레임을 영상으로 인코딩할 때 시간 참조할 수 있도록
+            if recording_active:
+                frame_buffer.append({"timestamp": timestamp, "image": image})
+                print(f"프레임 저장됨 ({len(frame_buffer)}개 누적)")
+            # ==========================================================================================================
+
             # 이미지 처리
             resized_image = cv2.resize(image, (800,700))
             current_image = resized_image
@@ -319,6 +358,14 @@ def handle_message(message):
             timestamp=data.get('timestamp')
             personIds=data.get('personIds')
             print(f"{timestamp} 시간에 {personIds} 없어짐")
+
+            # ==========================================================================================================
+            active_persons.update(personIds)
+            if not recording_active:
+                print("녹화 시작")
+                recording_active = True
+                frame_buffer = []
+            # ==========================================================================================================
             
             
              # 고객 상태 업데이트
@@ -331,11 +378,17 @@ def handle_message(message):
                         customer.state = '절도의심'
                         db.session.commit()
                         print(f"고객 ID {person_id} 절도 의심")
+                        # ==========================================================================================================
+                        save_person_video(person_id)  # 각 사람의 영상 생성 (절도 의심인 경우)
+                        # ==========================================================================================================
                     elif (customer.state == '결제중' and 
     (customer.product1 > 0 or customer.product2 > 0 or customer.product3 > 0)):
                         customer.state = '절도의심'
                         db.session.commit()
-                        print(f"고객 ID {person_id} 절도 의심")    
+                        print(f"고객 ID {person_id} 절도 의심")
+                        # ==========================================================================================================
+                        save_person_video(person_id)  # 각 사람의 영상 생성 (절도 의심인 경우)
+                        # ==========================================================================================================
                     elif customer.state == '결제완료':
                         # 결제 완료된 고객은 DB에서 삭제
                         #db.session.delete(customer)
@@ -345,6 +398,14 @@ def handle_message(message):
                         customer.state = '일반퇴장'
                         db.session.commit()
                         print(f"고객 ID {person_id} 일반퇴장")
+
+            # ==========================================================================================================
+            active_persons.difference_update(personIds)
+            if not active_persons:
+                recording_active = False
+                frame_buffer = []  # 전체 버퍼 초기화
+                print("모든 사람이 퇴장하여 녹화 중단")
+            # ==========================================================================================================
                         
         elif data.get('type') == 'action':
             person_id = data.get('personId')
