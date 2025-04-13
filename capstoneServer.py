@@ -44,7 +44,7 @@ def save_person_video(person_id):
 
 
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:csedbadmin@localhost/cctv_db'#db 연결
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:capstone@localhost/cctv_db'#db 연결
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -57,8 +57,9 @@ kiosk_waiting_client = None
 PRODUCT_MAPPING = {
     'cup': 'product1',
     'book': 'product2',
-    'phone': 'product3'
+    'laptop': 'product3'
 }
+#phone
 
 
 # 데이터베이스 모델 정의
