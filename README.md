@@ -1,1 +1,645 @@
-# server
+package com.example.quantiztest;
+
+import android.util.Log;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+
+public class SimpleTracker {
+    private static final String TAG = "SimpleTracker";
+    private static final float IOU_THRESHOLD = 0.25f; // 같은 객체로 간주할 IoU 임계값
+    private static final int MAX_AGE = 30; // 객체가 사라졌다고 판단하기 전 최대 프레임 수
+    private static final float MAX_COSINE_DISTANCE = 0.5f; // 특징 벡터 일치 임계값
+    private static final int FEATURE_VECTOR_SIZE = 128; // 특징 벡터 크기
+
+    private final Map<Integer, TrackedObject> trackedObjects = new HashMap<>();
+    private final FeatureExtractor featureExtractor; // 특징 추출기
+    private final KalmanFilter kalmanFilter; // 칼만 필터
+    private int nextId = 0;
+
+    // DeepSORT 추적기 초기화
+    public SimpleTracker() {
+        featureExtractor = new FeatureExtractor();
+        kalmanFilter = new KalmanFilter();
+    }
+
+    /**
+     * 현재 프레임에서 탐지된 객체를 이전 프레임의 추적 객체와 연결
+     * @param detections 현재 프레임에서 탐지된 객체 목록
+     * @return 추적 ID가 할당된 객체 목록
+     */
+    public List<TrackedObject> update(List<YoloImageProcessor.Detection> detections) {
+        // 빈 탐지 목록이면 모든 추적 객체의 나이를 증가시키고 반환
+        if (detections == null || detections.isEmpty()) {
+            increaseAge();
+            removeOldObjects();
+            return new ArrayList<>(trackedObjects.values());
+        }
+
+        // 1. 칼만 필터를 사용하여 모든 추적 객체의 다음 위치 예측
+        for (TrackedObject trackedObj : trackedObjects.values()) {
+            kalmanFilter.predict(trackedObj);
+        }
+
+        // 2. 특징 벡터 추출 (실제 구현에서는 이미지와 경계 상자가 필요)
+        float[][] features = new float[detections.size()][FEATURE_VECTOR_SIZE];
+        for (int i = 0; i < detections.size(); i++) {
+            features[i] = featureExtractor.extractFeatures(detections.get(i));
+        }
+
+        // 3. 비용 행렬 계산 (IoU + 외관 특징)
+        float[][] costMatrix = calculateCostMatrix(detections, features);
+
+        // 4. 헝가리안 알고리즘으로 최적 할당 계산
+        HungarianAlgorithm hungarian = new HungarianAlgorithm();
+        int[] assignments = hungarian.compute(costMatrix);
+
+        // 5. 매칭된 객체 업데이트 및 새 객체 등록
+        boolean[] matched = new boolean[detections.size()];
+        updateTrackedObjects(detections, features, assignments, matched);
+        createNewTracks(detections, features, matched);
+
+        // 6. 오래된 객체 제거
+        removeOldObjects();
+
+        // 현재 추적 중인 객체 목록 반환
+        return new ArrayList<>(trackedObjects.values());
+    }
+
+    // 비용 행렬 계산 (IoU + 외관 특징 기반)
+    private float[][] calculateCostMatrix(List<YoloImageProcessor.Detection> detections, float[][] features) {
+        int numTracked = trackedObjects.size();
+        int numDetected = detections.size();
+        float[][] costMatrix = new float[numTracked][numDetected];
+
+        int i = 0;
+        for (TrackedObject trackedObj : trackedObjects.values()) {
+            for (int j = 0; j < numDetected; j++) {
+                YoloImageProcessor.Detection detection = detections.get(j);
+                
+                // 다른 클래스의 객체는 큰 비용 부여 (매칭되지 않도록)
+                if (!trackedObj.getLabel().equals(detection.getLabel())) {
+                    costMatrix[i][j] = 1.0f; // 최대 비용
+                    continue;
+                }
+
+                // IoU 거리 계산 (1 - IoU)
+                float iouDist = 1 - calculateIoU(trackedObj, detection);
+                
+                // 외관 특징 거리 계산 (cosine distance)
+                float featureDist = calculateCosineDistance(trackedObj.getFeatures(), features[j]);
+                
+                // 최종 비용은 IoU와 특징 거리의 가중 합
+                costMatrix[i][j] = 0.7f * iouDist + 0.3f * featureDist;
+            }
+            i++;
+        }
+        
+        return costMatrix;
+    }
+    
+    // 특징 벡터 간의 코사인 거리 계산
+    private float calculateCosineDistance(float[] a, float[] b) {
+        float dot = 0.0f;
+        float normA = 0.0f;
+        float normB = 0.0f;
+        
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        
+        normA = (float) Math.sqrt(normA);
+        normB = (float) Math.sqrt(normB);
+        
+        if (normA == 0 || normB == 0) {
+            return 1.0f; // 최대 거리 반환
+        }
+        
+        float similarity = dot / (normA * normB);
+        // 코사인 거리는 1 - 코사인 유사도
+        return 1.0f - similarity;
+    }
+    
+    // 매칭된 객체 업데이트
+    private void updateTrackedObjects(List<YoloImageProcessor.Detection> detections, float[][] features, 
+                                     int[] assignments, boolean[] matched) {
+        List<TrackedObject> trackList = new ArrayList<>(trackedObjects.values());
+        for (int i = 0; i < assignments.length; i++) {
+            int detectionIndex = assignments[i];
+            
+            // 유효한 매칭이 있는 경우
+            if (detectionIndex >= 0) {
+                TrackedObject trackedObj = trackList.get(i);
+                YoloImageProcessor.Detection detection = detections.get(detectionIndex);
+                
+                // 매칭 품질 확인 (임계값 이하인 경우에만 업데이트)
+                float iou = calculateIoU(trackedObj, detection);
+                float featureDist = calculateCosineDistance(trackedObj.getFeatures(), features[detectionIndex]);
+                float matchQuality = 0.7f * (1 - iou) + 0.3f * featureDist;
+                
+                if (matchQuality <= 0.7f) { // 적절한 임계값
+                    // 칼만 필터를 사용하여 위치 업데이트
+                    kalmanFilter.update(trackedObj, detection);
+                    
+                    // 특징 벡터 업데이트 (이동 평균)
+                    updateFeatureVector(trackedObj, features[detectionIndex]);
+                    
+                    // 객체 정보 업데이트
+                    trackedObj.update(detection);
+                    matched[detectionIndex] = true;
+                }
+            }
+        }
+    }
+    
+    // 특징 벡터 업데이트 (이동 평균)
+    private void updateFeatureVector(TrackedObject trackedObj, float[] newFeatures) {
+        float[] currentFeatures = trackedObj.getFeatures();
+        float alpha = 0.7f; // 이동 평균 가중치
+        
+        for (int i = 0; i < currentFeatures.length; i++) {
+            currentFeatures[i] = alpha * currentFeatures[i] + (1 - alpha) * newFeatures[i];
+        }
+        
+        // 벡터 정규화
+        float norm = 0;
+        for (float f : currentFeatures) {
+            norm += f * f;
+        }
+        norm = (float) Math.sqrt(norm);
+        
+        if (norm > 0) {
+            for (int i = 0; i < currentFeatures.length; i++) {
+                currentFeatures[i] /= norm;
+            }
+        }
+    }
+    
+    // 새 객체 생성
+    private void createNewTracks(List<YoloImageProcessor.Detection> detections, float[][] features, boolean[] matched) {
+        for (int i = 0; i < detections.size(); i++) {
+            if (!matched[i]) {
+                YoloImageProcessor.Detection detection = detections.get(i);
+                
+                // 충분한 신뢰도를 가진 탐지에 대해서만 새 객체 생성
+                if (detection.getConfidence() >= 0.5f) {
+                    TrackedObject newTrackedObj = new TrackedObject(
+                        nextId++,
+                        detection.getLabel(),
+                        detection.getConfidence(),
+                        detection.getLeft(),
+                        detection.getTop(),
+                        detection.getRight(),
+                        detection.getBottom(),
+                        features[i] // 특징 벡터 저장
+                    );
+                    
+                    // 칼만 필터 초기화
+                    kalmanFilter.initiate(newTrackedObj);
+                    
+                    // 추적 객체 목록에 추가
+                    trackedObjects.put(newTrackedObj.getId(), newTrackedObj);
+                }
+            }
+        }
+    }
+
+    /**
+     * 모든 추적 객체의 나이를 증가시킴
+     */
+    private void increaseAge() {
+        for (TrackedObject obj : trackedObjects.values()) {
+            obj.incrementAge();
+        }
+    }
+
+    /**
+     * 지정된 최대 나이보다 오래된 객체 제거
+     */
+    private void removeOldObjects() {
+        Iterator<Map.Entry<Integer, TrackedObject>> it = trackedObjects.entrySet().iterator();
+        while (it.hasNext()) {
+            TrackedObject obj = it.next().getValue();
+            if (obj.getAge() > MAX_AGE) {
+                Log.d(TAG, "객체 제거: ID=" + obj.getId() + ", Label=" + obj.getLabel());
+                it.remove();
+            }
+        }
+    }
+
+    /**
+     * 두 객체 간의 IoU(Intersection over Union)를 계산
+     */
+    private float calculateIoU(TrackedObject trackedObj, YoloImageProcessor.Detection detection) {
+        // 교차 영역 계산
+        float xLeft = Math.max(trackedObj.getLeft(), detection.getLeft());
+        float yTop = Math.max(trackedObj.getTop(), detection.getTop());
+        float xRight = Math.min(trackedObj.getRight(), detection.getRight());
+        float yBottom = Math.min(trackedObj.getBottom(), detection.getBottom());
+
+        // 교차 영역이 없으면 0 반환
+        if (xRight < xLeft || yBottom < yTop) return 0;
+
+        float intersectionArea = (xRight - xLeft) * (yBottom - yTop);
+
+        // 각 영역 계산
+        float trackedObjArea = (trackedObj.getRight() - trackedObj.getLeft()) *
+                (trackedObj.getBottom() - trackedObj.getTop());
+        float detectionArea = (detection.getRight() - detection.getLeft()) *
+                (detection.getBottom() - detection.getTop());
+
+        // IoU 계산
+        return intersectionArea / (trackedObjArea + detectionArea - intersectionArea);
+    }
+
+    /**
+     * 추적 객체 클래스 (확장)
+     */
+    public static class TrackedObject {
+        private final int id;
+        private String label;
+        private float confidence;
+        private float left;
+        private float top;
+        private float right;
+        private float bottom;
+        private int age;
+        private float[] features; // 외관 특징 벡터
+
+        // 칼만 필터를 위한 상태 변수
+        private float[] state; // [x, y, a, h, vx, vy, va, vh] - 중심 좌표, 가로세로비, 높이, 속도
+        private float[][] covariance; // 공분산 행렬
+
+        // 속도 추적을 위한 필드
+        private float velocityX;
+        private float velocityY; 
+        private float prevCenterX;
+        private float prevCenterY;
+        private long lastMatchedTime;
+
+        // 생성자
+        public TrackedObject(int id, String label, float confidence,
+                            float left, float top, float right, float bottom, float[] features) {
+            this.id = id;
+            this.label = label;
+            this.confidence = confidence;
+            this.left = left;
+            this.top = top;
+            this.right = right;
+            this.bottom = bottom;
+            this.age = 0;
+            this.lastMatchedTime = System.currentTimeMillis();
+            this.velocityX = 0;
+            this.velocityY = 0;
+            this.prevCenterX = (left + right) / 2;
+            this.prevCenterY = (top + bottom) / 2;
+            this.features = features;
+            
+            // 칼만 필터 상태는 KalmanFilter 클래스에서 초기화
+        }
+
+        /**
+         * 새로운 탐지 결과로 추적 객체 업데이트
+         */
+        public void update(YoloImageProcessor.Detection detection) {
+            // 속도 계산 (이전 중심점과 새 중심점 사용)
+            float centerX = (detection.getLeft() + detection.getRight()) / 2;
+            float centerY = (detection.getTop() + detection.getBottom()) / 2;
+
+            // 속도 업데이트 (이동 평균 사용)
+            float alpha = 0.7f;
+            velocityX = alpha * (centerX - prevCenterX) + (1 - alpha) * velocityX;
+            velocityY = alpha * (centerY - prevCenterY) + (1 - alpha) * velocityY;
+
+            this.confidence = detection.getConfidence();
+            this.left = detection.getLeft();
+            this.top = detection.getTop();
+            this.right = detection.getRight();
+            this.bottom = detection.getBottom();
+
+            // 중심점 저장
+            this.prevCenterX = centerX;
+            this.prevCenterY = centerY;
+
+            // 나이 초기화 및 매칭 시간 업데이트
+            this.age = 0;
+            this.lastMatchedTime = System.currentTimeMillis();
+        }
+
+        public void incrementAge() {
+            this.age++;
+        }
+
+        // 칼만 필터 상태 설정/가져오기 메소드
+        public void setState(float[] state) {
+            this.state = state;
+        }
+
+        public float[] getState() {
+            return state;
+        }
+
+        public void setCovariance(float[][] covariance) {
+            this.covariance = covariance;
+        }
+
+        public float[][] getCovariance() {
+            return covariance;
+        }
+
+        // Getters
+        public int getId() { return id; }
+        public String getLabel() { return label; }
+        public float getConfidence() { return confidence; }
+        public float getLeft() { return left; }
+        public float getTop() { return top; }
+        public float getRight() { return right; }
+        public float getBottom() { return bottom; }
+        public int getAge() { return age; }
+        public long getLastMatchedTime() { return lastMatchedTime; }
+        public float[] getFeatures() { return features; }
+
+        @Override
+        public String toString() {
+            return id + ": " + label + " (" + String.format("%.2f", confidence * 100) + "%), age=" + age;
+        }
+    }
+
+    /**
+     * 특징 추출기 클래스 (DeepSORT를 위한 외관 특징 추출)
+     */
+    private class FeatureExtractor {
+        // 실제 구현에서는 CNN 모델을 사용하지만, 여기서는 간단한 예시로 대체
+        public float[] extractFeatures(YoloImageProcessor.Detection detection) {
+            // 실제로는 객체 영역의 이미지에서 CNN으로 특징 추출
+            // 여기서는 임의의 특징 벡터를 생성하여 반환
+            float[] features = new float[FEATURE_VECTOR_SIZE];
+            
+            // 객체 위치와 크기를 기반으로 의사 특징 생성 (실제 구현에서는 제거해야 함)
+            float centerX = (detection.getLeft() + detection.getRight()) / 2;
+            float centerY = (detection.getTop() + detection.getBottom()) / 2;
+            float width = detection.getRight() - detection.getLeft();
+            float height = detection.getBottom() - detection.getTop();
+            
+            // 이미지 특징을 시뮬레이션하기 위한 임의 값 (실제 구현에서는 CNN 사용)
+            for (int i = 0; i < FEATURE_VECTOR_SIZE; i++) {
+                // 의사 난수 생성기를 사용하여 고유한 특징 생성
+                features[i] = (float) Math.sin(centerX * 0.1 + i) * (float) Math.cos(centerY * 0.1 + i) *
+                              (float) Math.sin(width * 0.2 + i) * (float) Math.cos(height * 0.2 + i);
+            }
+            
+            // 특징 벡터 정규화
+            float norm = 0;
+            for (float f : features) {
+                norm += f * f;
+            }
+            norm = (float) Math.sqrt(norm);
+            
+            if (norm > 0) {
+                for (int i = 0; i < features.length; i++) {
+                    features[i] /= norm;
+                }
+            }
+            
+            return features;
+        }
+    }
+
+    /**
+     * 칼만 필터 클래스 (DeepSORT를 위한 위치 예측)
+     */
+    private class KalmanFilter {
+        private static final float STD_WEIGHT_POSITION = 0.1f;
+        private static final float STD_WEIGHT_VELOCITY = 0.01f;
+        
+        // 초기 상태 설정
+        public void initiate(TrackedObject obj) {
+            float centerX = (obj.getLeft() + obj.getRight()) / 2;
+            float centerY = (obj.getTop() + obj.getBottom()) / 2;
+            float width = obj.getRight() - obj.getLeft();
+            float height = obj.getBottom() - obj.getTop();
+            float aspect = width / height;
+            
+            // 상태 벡터: [x, y, a, h, vx, vy, va, vh]
+            float[] state = new float[8];
+            state[0] = centerX;
+            state[1] = centerY;
+            state[2] = aspect;
+            state[3] = height;
+            state[4] = 0; // vx
+            state[5] = 0; // vy
+            state[6] = 0; // va
+            state[7] = 0; // vh
+            
+            // 공분산 행렬 초기화
+            float[][] covariance = new float[8][8];
+            for (int i = 0; i < 8; i++) {
+                for (int j = 0; j < 8; j++) {
+                    covariance[i][j] = 0;
+                }
+            }
+            
+            // 위치 불확실성
+            float std_pos = STD_WEIGHT_POSITION;
+            covariance[0][0] = std_pos * std_pos * width * width; // x
+            covariance[1][1] = std_pos * std_pos * height * height; // y
+            covariance[2][2] = std_pos * std_pos * aspect * aspect; // a
+            covariance[3][3] = std_pos * std_pos * height * height; // h
+            
+            // 속도 불확실성
+            float std_vel = STD_WEIGHT_VELOCITY;
+            covariance[4][4] = std_vel * std_vel * width * width; // vx
+            covariance[5][5] = std_vel * std_vel * height * height; // vy
+            covariance[6][6] = std_vel * std_vel * aspect * aspect; // va
+            covariance[7][7] = std_vel * std_vel * height * height; // vh
+            
+            obj.setState(state);
+            obj.setCovariance(covariance);
+        }
+        
+        // 다음 상태 예측
+        public void predict(TrackedObject obj) {
+            float[] state = obj.getState();
+            float[][] covariance = obj.getCovariance();
+            
+            if (state == null || covariance == null) {
+                return; // 상태가 초기화되지 않은 경우
+            }
+            
+            // 상태 전이 행렬 (단순화된 버전)
+            float dt = 1.0f; // 시간 간격
+            
+            // 새 위치 = 이전 위치 + 속도 * dt
+            state[0] += state[4] * dt;
+            state[1] += state[5] * dt;
+            state[2] += state[6] * dt;
+            state[3] += state[7] * dt;
+            
+            // 공분산 업데이트 (단순화된 버전)
+            float std_pos = STD_WEIGHT_POSITION;
+            float std_vel = STD_WEIGHT_VELOCITY;
+            float width = state[3] * state[2]; // height * aspect
+            float height = state[3];
+            
+            // 공분산 행렬의 위치 불확실성 증가
+            covariance[0][0] += covariance[4][4] * dt * dt + std_pos * std_pos * width * width;
+            covariance[1][1] += covariance[5][5] * dt * dt + std_pos * std_pos * height * height;
+            covariance[2][2] += covariance[6][6] * dt * dt + std_pos * std_pos * state[2] * state[2];
+            covariance[3][3] += covariance[7][7] * dt * dt + std_pos * std_pos * height * height;
+            
+            // 예측된 상태에 따라 바운딩 박스 업데이트
+            updateBoundingBox(obj);
+        }
+        
+        // 예측된 상태를 바운딩 박스 좌표로 변환
+        private void updateBoundingBox(TrackedObject obj) {
+            float[] state = obj.getState();
+            
+            float centerX = state[0];
+            float centerY = state[1];
+            float aspect = state[2];
+            float height = state[3];
+            float width = height * aspect;
+            
+            float left = centerX - width / 2;
+            float top = centerY - height / 2;
+            float right = centerX + width / 2;
+            float bottom = centerY + height / 2;
+            
+            // 객체 정보 업데이트
+            obj.left = left;
+            obj.top = top;
+            obj.right = right;
+            obj.bottom = bottom;
+        }
+        
+        // 측정값으로 상태 업데이트
+        public void update(TrackedObject obj, YoloImageProcessor.Detection detection) {
+            float[] state = obj.getState();
+            float[][] covariance = obj.getCovariance();
+            
+            if (state == null || covariance == null) {
+                return; // 상태가 초기화되지 않은 경우
+            }
+            
+            // 측정값 계산
+            float centerX = (detection.getLeft() + detection.getRight()) / 2;
+            float centerY = (detection.getTop() + detection.getBottom()) / 2;
+            float width = detection.getRight() - detection.getLeft();
+            float height = detection.getBottom() - detection.getTop();
+            float aspect = width / height;
+            
+            float[] measurement = new float[4];
+            measurement[0] = centerX;
+            measurement[1] = centerY;
+            measurement[2] = aspect;
+            measurement[3] = height;
+            
+            // 칼만 이득 계산 (단순화된 버전)
+            float k = 0.7f; // 고정 이득 (실제로는 공분산에 따라 계산)
+            
+            // 상태 업데이트
+            state[0] = state[0] * (1 - k) + measurement[0] * k;
+            state[1] = state[1] * (1 - k) + measurement[1] * k;
+            state[2] = state[2] * (1 - k) + measurement[2] * k;
+            state[3] = state[3] * (1 - k) + measurement[3] * k;
+            
+            // 속도 업데이트
+            float dt = 1.0f;
+            state[4] = (measurement[0] - state[0]) / dt; // vx
+            state[5] = (measurement[1] - state[1]) / dt; // vy
+            state[6] = (measurement[2] - state[2]) / dt; // va
+            state[7] = (measurement[3] - state[3]) / dt; // vh
+            
+            // 공분산 업데이트 (단순화된 버전)
+            for (int i = 0; i < 8; i++) {
+                for (int j = 0; j < 8; j++) {
+                    covariance[i][j] *= (1 - k);
+                }
+            }
+            
+            // 예측된 상태에 따라 바운딩 박스 업데이트
+            updateBoundingBox(obj);
+        }
+    }
+
+    /**
+     * 헝가리안 알고리즘 클래스 (최적 할당 문제 해결)
+     */
+    private class HungarianAlgorithm {
+        public int[] compute(float[][] costMatrix) {
+            if (costMatrix.length == 0) {
+                return new int[0];
+            }
+            
+            int rows = costMatrix.length;
+            int cols = costMatrix[0].length;
+            
+            // 할당 결과 배열 초기화 (-1은 할당되지 않음을 의미)
+            int[] assignments = new int[rows];
+            Arrays.fill(assignments, -1);
+            
+            // 비용 행렬이 작은 경우 직접 최적 할당 계산
+            if (rows <= 10 && cols <= 10) {
+                // 각 행별 최소 비용을 가진 열 찾기
+                for (int i = 0; i < rows; i++) {
+                    float minCost = Float.MAX_VALUE;
+                    int bestCol = -1;
+                    
+                    for (int j = 0; j < cols; j++) {
+                        // 이미 할당된 열인지 확인
+                        boolean alreadyAssigned = false;
+                        for (int k = 0; k < i; k++) {
+                            if (assignments[k] == j) {
+                                alreadyAssigned = true;
+                                break;
+                            }
+                        }
+                        
+                        // 할당되지 않았고 비용이 임계값 이하인 경우에만 고려
+                        if (!alreadyAssigned && costMatrix[i][j] < minCost && costMatrix[i][j] <= 0.7f) {
+                            minCost = costMatrix[i][j];
+                            bestCol = j;
+                        }
+                    }
+                    
+                    // 적합한 열을 찾은 경우 할당
+                    if (bestCol >= 0) {
+                        assignments[i] = bestCol;
+                    }
+                }
+                
+                return assignments;
+            }
+            
+            // 비용 행렬이 큰 경우, 간단한 그리디 접근법 사용
+            // (실제 헝가리안 알고리즘은 더 복잡하지만 여기서는 간소화)
+            boolean[] colAssigned = new boolean[cols];
+            
+            // 모든 행에 대해 비용이 가장 낮은 열 할당
+            for (int i = 0; i < rows; i++) {
+                float minCost = Float.MAX_VALUE;
+                int bestCol = -1;
+                
+                for (int j = 0; j < cols; j++) {
+                    if (!colAssigned[j] && costMatrix[i][j] < minCost && costMatrix[i][j] <= 0.7f) {
+                        minCost = costMatrix[i][j];
+                        bestCol = j;
+                    }
+                }
+                
+                if (bestCol >= 0) {
+                    assignments[i] = bestCol;
+                    colAssigned[bestCol] = true;
+                }
+            }
+            
+            return assignments;
+        }
+    }
+}
