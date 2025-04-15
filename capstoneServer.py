@@ -44,7 +44,7 @@ def save_person_video(person_id):
 
 
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:capstone@localhost/cctv_db'#db 연결
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:csedbadmin@localhost/cctv_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -331,6 +331,17 @@ def handle_message(message):
             personIds = data.get('personIds')
             #thumbnail도 받기
             print(f"{timestamp} 시간에 {personIds} 등장")
+
+
+            # ==========================================================================================================
+            active_persons.update(personIds)
+            if not recording_active:
+                print("버퍼 담기 시작")
+                recording_active = True
+                frame_buffer = []
+            # ==========================================================================================================
+            
+
             # 받은 얼굴 이미지 처리 및 표시
             for person_id in personIds:
                 # 이미 존재하는지 확인
@@ -360,14 +371,6 @@ def handle_message(message):
             personIds=data.get('personIds')
             print(f"{timestamp} 시간에 {personIds} 없어짐")
 
-            # ==========================================================================================================
-            active_persons.update(personIds)
-            if not recording_active:
-                print("녹화 시작")
-                recording_active = True
-                frame_buffer = []
-            # ==========================================================================================================
-            
             
              # 고객 상태 업데이트
             for person_id in personIds:
