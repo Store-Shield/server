@@ -109,6 +109,12 @@
             background-color: #f2f2f2;
         }
         
+        .cart-items img {
+            max-width: 50px;
+            max-height: 50px;
+            border-radius: 4px;
+        }
+        
         .cart-total {
             font-weight: bold;
             text-align: right;
@@ -177,6 +183,7 @@
                     <thead>
                         <tr>
                             <th>상품</th>
+                            <th>상품명</th>
                             <th>수량</th>
                             <th>가격</th>
                             <th>소계</th>
@@ -213,13 +220,6 @@
         const confirmPaymentBtn = document.getElementById('confirm-payment-btn');
         const paymentSuccess = document.getElementById('payment-success');
         const connectionStatus = document.getElementById('connection-status');
-        
-        // 상품 정보 (상품명과 가격)
-        const productInfo = {
-            'product1': { name: '컵', price: 5000 },
-            'product2': { name: '책', price: 15000 },
-            'product3': { name: '노트북', price: 25000 }
-        };
         
         // 결제 중인 고객 ID
         let currentCustomerId = null;
@@ -258,48 +258,54 @@
             loadingSpinner.style.display = 'none';
             
             // 고객 정보가 있는 경우
-            if (data.success==1) {
-                currentCustomerId = data.customer.person_id;
+            if (data.success == 1) {
+                currentCustomerId = data.customer.customer_id;
                 
                 // 고객 ID 표시
-                customerId.textContent = `고객 ID: ${data.customer.person_id}`;
+                customerId.textContent = `고객 ID: ${data.customer.customer_id}`;
                 
                 // 장바구니 아이템 생성
                 cartItemsBody.innerHTML = '';
                 let total = 0;
                 
                 // 각 상품 추가
-                Object.keys(productInfo).forEach(productKey => {
-                    const quantity = data.customer[productKey];
-                    if (quantity > 0) {
-                        const product = productInfo[productKey];
-                        const subtotal = product.price * quantity;
-                        total += subtotal;
+                if (data.customer.cart_items && data.customer.cart_items.length > 0) {
+                    data.customer.cart_items.forEach(item => {
+                        const productImageHtml = item.product_image ? 
+                            `<img src="data:image/jpeg;base64,${item.product_image}" alt="${item.product_name}">` : 
+                            '🛒';
                         
                         const row = document.createElement('tr');
                         row.innerHTML = `
-                            <td>${product.name}</td>
-                            <td>${quantity}</td>
-                            <td>${product.price.toLocaleString()}원</td>
-                            <td>${subtotal.toLocaleString()}원</td>
+                            <td>${productImageHtml}</td>
+                            <td>${item.product_name}</td>
+                            <td>${item.count}</td>
+                            <td>${item.price.toLocaleString()}원</td>
+                            <td>${item.subtotal.toLocaleString()}원</td>
                         `;
                         cartItemsBody.appendChild(row);
-                    }
-                });
+                        total += item.subtotal;
+                    });
+                } else {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td colspan="5" style="text-align: center;">장바구니가 비어있습니다</td>
+                    `;
+                    cartItemsBody.appendChild(row);
+                }
                 
                 // 총액 업데이트
                 totalAmount.textContent = total.toLocaleString();
                 
                 // 고객 정보 섹션 표시
                 customerInfo.style.display = 'block';
-            }else if(data.success==0){
-                 // 고객은 찾았지만 결제할 품목이 없는 경우
-                currentCustomerId = data.customer.person_id;
+            } else if (data.success == 0) {
+                // 고객은 찾았지만 결제할 품목이 없는 경우
+                currentCustomerId = data.customer.customer_id;
                 alert(`${currentCustomerId}님은 결제할 품목이 없습니다.`);
                 checkoutBtn.disabled = false;
                 checkoutBtn.classList.remove('disabled');
-            }
-            else {
+            } else {
                 // 고객을 찾지 못한 경우
                 alert('근처에서 고객을 찾을 수 없습니다. 다시 시도해주세요.');
                 checkoutBtn.disabled = false;

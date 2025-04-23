@@ -78,13 +78,13 @@
             z-index: 10;
         }
         
-                .customers-container {
-                width: 50%;
-                padding: 15px;
-                overflow-y: auto; /* 세로 스크롤 */
-                height: calc(80vh); /* 헤더 높이(60px)와 하단 여백(20px) 제외 */
-                padding-bottom: 100px; /* 하단에 여백 추가 */
-            }
+        .customers-container {
+            width: 50%;
+            padding: 15px;
+            overflow-y: auto; /* 세로 스크롤 */
+            height: calc(80vh); /* 헤더 높이(60px)와 하단 여백(20px) 제외 */
+            padding-bottom: 100px; /* 하단에 여백 추가 */
+        }
         
         .customers-list {
             display: flex;
@@ -120,8 +120,8 @@
         }
         
         .customer-avatar {
-            width: 50px;
-            height: 50px;
+            width: 75px;
+            height: 75px;
             border-radius: 50%;
             margin: 0 auto 10px;
             background-color: #eee;
@@ -132,6 +132,13 @@
             font-weight: bold;
             color: #555;
             border: 2px solid #ddd;
+            overflow: hidden;
+        }
+        
+        .customer-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
         
         .customer-header {
@@ -142,6 +149,7 @@
         
         .customer-info {
             margin-left: 15px;
+            flex: 1;
         }
         
         .customer-id {
@@ -149,6 +157,12 @@
             font-weight: bold;
             margin: 5px 0;
             color: #333;
+        }
+        
+        .customer-details {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 5px;
         }
         
         .customer-status {
@@ -180,10 +194,15 @@
             color: #C62828;
         }
         
+        .status-exit {
+            background-color: #E0E0E0;
+            color: #616161;
+        }
+        
         .product-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 5px;
+            gap: 8px;
             margin-top: 10px;
         }
         
@@ -192,42 +211,39 @@
             flex-direction: column;
             align-items: center;
             background-color: #f9f9f9;
-            padding: 5px;
+            padding: 8px;
             border-radius: 5px;
         }
         
-        .product-icon {
-            width: 30px;
-            height: 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%;
-            margin-bottom: 3px;
-            color: white;
-            font-size: 16px;
+        .product-image {
+            width: 32px;
+            height: 32px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 5px;
         }
         
-        .cup-icon {
-            background-color: #F44336;
-        }
-        
-        .book-icon {
-            background-color: #2196F3;
-        }
-        
-        .laptop-icon {
-            background-color: #4CAF50;
+        .product-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
         
         .product-name {
-            font-size: 11px;
+            font-size: 12px;
             margin: 2px 0;
+            text-align: center;
         }
         
         .product-count {
             font-weight: bold;
             font-size: 14px;
+        }
+        
+        .total-price {
+            text-align: right;
+            margin-top: 10px;
+            font-weight: bold;
         }
         
         .no-customers {
@@ -269,9 +285,18 @@
                 height: calc(60vh - 60px);
             }
         }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
+    <script type="application/json" id="initial-customers-data">
+        {{ customers|tojson|safe }}
+    </script>
+
     <div class="container">
         <div class="header">
             <h1>실시간 CCTV 분석 시스템</h1>
@@ -333,6 +358,8 @@
                     return { class: 'status-completed', text: '결제완료', cardClass: 'completed' };
                 case '절도의심':
                     return { class: 'status-theft', text: '절도의심', cardClass: 'theft' };
+                case '일반퇴장':
+                    return { class: 'status-exit', text: '일반퇴장', cardClass: '' };
                 default:
                     return { class: '', text: state, cardClass: '' };
             }
@@ -340,49 +367,75 @@
         
         // 고객 카드 HTML 생성
         function createCustomerCard(customer) {
-            const statusInfo = getStatusInfo(customer.state);
+            const statusInfo = getStatusInfo(customer.cal_state);
+            
+            // 고객 이미지 HTML
+            let customerImageHtml = `<div>${customer.customer_id}</div>`;
+            if (customer.customer_image) {
+                customerImageHtml = `<img src="data:image/jpeg;base64,${customer.customer_image}" alt="고객 ID: ${customer.customer_id}">`;
+            }
+            
+            // 입장/퇴장 시간 포맷
+            const comeInTime = customer.come_in ? new Date(customer.come_in).toLocaleTimeString() : '없음';
+            const comeOutTime = customer.come_out ? new Date(customer.come_out).toLocaleTimeString() : '없음';
+            
+            // 제품 목록 HTML 생성
+            let productsHtml = '<p>장바구니가 비어있습니다</p>';
+            let totalPrice = 0;
+            
+            if (customer.cart_items && customer.cart_items.length > 0) {
+                productsHtml = customer.cart_items.map(item => {
+                    totalPrice += item.subtotal;
+                    
+                    // 제품 이미지 HTML
+                    let productImageHtml = '🛒';
+                    if (item.product_image) {
+                        productImageHtml = `<img src="data:image/jpeg;base64,${item.product_image}" alt="${item.product_name}">`;
+                    }
+                    
+                    return `
+                        <div class="product-item">
+                            <div class="product-image">${productImageHtml}</div>
+                            <div class="product-name">${item.product_name}</div>
+                            <div class="product-count">${item.count}</div>
+                        </div>
+                    `;
+                }).join('');
+            }
             
             return `
-                <div class="customer-card ${statusInfo.cardClass}" id="customer-${customer.person_id}">
+                <div class="customer-card ${statusInfo.cardClass}" id="customer-${customer.customer_id}">
                     <div class="customer-header">
                         <div class="customer-avatar">
-                            ${customer.person_id}
+                            ${customerImageHtml}
                         </div>
                         <div class="customer-info">
-                            <h3 class="customer-id">고객 ID: ${customer.person_id}</h3>
+                            <h3 class="customer-id">고객 ID: ${customer.customer_id}</h3>
+                            <div class="customer-details">입장: ${comeInTime} / 퇴장: ${comeOutTime}</div>
                             <span class="customer-status ${statusInfo.class}">${statusInfo.text}</span>
                         </div>
                     </div>
                     
                     <div class="product-grid">
-                        <div class="product-item">
-                            <div class="product-icon cup-icon">☕</div>
-                            <div class="product-name">컵</div>
-                            <div class="product-count">X${customer.product1}</div>
-                        </div>
-                        <div class="product-item">
-                            <div class="product-icon book-icon">📚</div>
-                            <div class="product-name">책</div>
-                            <div class="product-count">X${customer.product2}</div>
-                        </div>
-                        <div class="product-item">
-                            <div class="product-icon laptop-icon">💻</div>
-                            <div class="product-name">노트북</div>
-                            <div class="product-count">X${customer.product3}</div>
-                        </div>
+                        ${productsHtml}
                     </div>
+                    
+                    <div class="total-price">총액: ${totalPrice.toLocaleString()}원</div>
                 </div>
             `;
         }
         
-        // 실시간 업데이트 처리
-        socket.on('update', (data) => {
-            // CCTV 이미지 업데이트
+        // 이미지 업데이트 처리 (서버에서 주기적으로 푸시)
+        socket.on('image_update', (data) => {
+            
             if (data.image) {
                 cctvImage.src = `data:image/jpeg;base64,${data.image}`;
             }
-            
-            // 고객 정보 업데이트
+        });
+        
+        // 고객 데이터 업데이트 처리 (이벤트 발생 시 푸시)
+        socket.on('customer_update', (data) => {
+            console.log("customer_update호출")
             if (data.customers) {
                 // 고객이 있는지 확인
                 if (data.customers.length > 0) {
@@ -403,8 +456,8 @@
                         customersList.appendChild(customerCard.firstElementChild);
                         
                         // 새로 추가된 고객은 하이라이트 효과
-                        if (!currentCustomerIds.includes(customer.person_id)) {
-                            const card = document.getElementById(`customer-${customer.person_id}`);
+                        if (!currentCustomerIds.includes(customer.customer_id)) {
+                            const card = document.getElementById(`customer-${customer.customer_id}`);
                             if (card) {
                                 card.style.animation = 'fadeIn 1s';
                             }
@@ -418,29 +471,31 @@
             }
         });
         
-        // 주기적으로 업데이트 요청
-        function requestUpdate() {
-            socket.emit('request_update');
-            setTimeout(requestUpdate, 100); // 0.1초마다 업데이트 요청
+        window.onload = function() {
+    try {
+        // 숨겨진 요소에서 데이터 가져오기
+        const dataElement = document.getElementById('initial-customers-data');
+        let initialCustomers = [];
+        
+        if (dataElement) {
+            // 텍스트 내용 파싱하기
+            initialCustomers = JSON.parse(dataElement.textContent);
         }
         
-        // 페이지 로드 시 초기화
-        window.onload = function() {
-            // 초기 고객 목록은 서버에서 페이지 렌더링 시 전달됨
-            const initialCustomers = JSON.parse('{{ customers|tojson|safe }}');
-            
-            if (initialCustomers && initialCustomers.length > 0) {
-                noCustomersMessage.style.display = 'none';
-                initialCustomers.forEach(customer => {
-                    const customerCard = document.createElement('div');
-                    customerCard.innerHTML = createCustomerCard(customer);
-                    customersList.appendChild(customerCard.firstElementChild);
-                });
-            }
-            
-            // 업데이트 요청 시작
-            requestUpdate();
-        };
+        if (initialCustomers && initialCustomers.length > 0) {
+            noCustomersMessage.style.display = 'none';
+            initialCustomers.forEach(customer => {
+                const customerCard = document.createElement('div');
+                customerCard.innerHTML = createCustomerCard(customer);
+                customersList.appendChild(customerCard.firstElementChild);
+            });
+        }
+    } catch (error) {
+        console.error("고객 데이터 처리 오류:", error);
+    }
+};
     </script>
+
+
 </body>
 </html>
