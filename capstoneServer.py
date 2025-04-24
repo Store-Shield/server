@@ -7,10 +7,11 @@ from flask_socketio import SocketIO, emit
 import threading
 from flask_sqlalchemy import SQLAlchemy
 from flask import send_file  # 이 라인이 파일 상단에 있어야 합니다
-
+import json
 from datetime import datetime, date
 import time
 from sqlalchemy import func, and_, or_
+from datetime import datetime, date, timedelta
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -921,6 +922,191 @@ def handle_alert_page_data(year, stock_lack_count):
 
 
 #=========================    hyechang code ============================
+
+
+
+#================================상우=========================================
+os.makedirs('cache', exist_ok=True)
+
+@app.route('/api/sales/<int:year>/<int:month>', methods=['GET'])
+def get_monthly_sales(year, month):
+    """월별 매출 요약 정보만 반환하는 API (날짜별 총액)"""
+    
+    # 캐시 키 생성
+    cache_key = f"sales_summary_{year}_{month}"
+    
+    # 1. 파일 캐시 확인
+    cache_file = f"cache/{cache_key}.json"
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                return jsonify(json.load(f))
+    except Exception as e:
+        print(f"캐시 로드 오류: {str(e)}")
+        
+    # 2. 현재 월만 조회
+    start_date = datetime(year, month, 1)
+    if month == 12:
+        end_date = datetime(year+1, 1, 1) - timedelta(seconds=1)
+    else:
+        end_date = datetime(year, month+1, 1) - timedelta(seconds=1)
+    
+    # 3. 최적화된 쿼리: 날짜별 총액만 GROUP BY로 가져오기
+    sales_by_date = db.session.query(
+        func.date(Payment.pay_time).label('date'),
+        func.sum(Cart.total_price).label('total')
+    ).join(
+        Cart, Payment.cart_id == Cart.cart_id
+    ).filter(
+        Payment.pay_time.between(start_date, end_date)
+    ).group_by(
+        func.date(Payment.pay_time)
+    ).all()
+    
+    result = {}
+    
+    # 결과 데이터 구성 - 상세 항목 없이 총액만
+    for date, total in sales_by_date:
+        date_str = date.strftime('%Y-%m-%d')
+        result[date_str] = {
+            "total": float(total) if total else 0
+        }
+    
+    # 캐시 저장
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(result, f)
+    except Exception as e:
+        print(f"캐시 저장 오류: {str(e)}")
+        
+    response = jsonify(result)
+    response.headers['Cache-Control'] = 'public, max-age=86400'  # 24시간 캐싱
+    return response
+
+@app.route('/api/sales/day/<string:date_str>', methods=['GET'])
+def get_daily_sales_detail(date_str):
+    """특정 날짜의 상세 매출 정보를 반환하는 API (고객 ID + 결제 시간별로 묶음)"""
+
+    # 캐시 키 생성
+    cache_key = f"salesdetail{date_str}"
+
+    # 1. 파일 캐시 확인
+    cache_file = f"cache/{cache_key}.json"
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                return jsonify(json.load(f))
+    except Exception as e:
+        print(f"캐시 로드 오류: {str(e)}")
+
+    try:
+        # 날짜 문자열 파싱 (YYYY-MM-DD 형식)
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        next_day = date_obj + timedelta(days=1)
+    except ValueError:
+        return jsonify({"error": "잘못된 날짜 형식. YYYY-MM-DD 형식이어야 합니다."}), 400
+
+    # 해당 날짜의 총액 계산
+    total_sales = db.session.query(
+        func.sum(Cart.total_price).label('total')
+    ).join(
+        Payment, Payment.cart_id == Cart.cart_id
+    ).filter(
+        Payment.pay_time >= date_obj,
+        Payment.pay_time < next_day
+    ).scalar()
+
+    # 결과 데이터 구조 초기화
+    result = {
+        "total": float(total_sales) if total_sales else 0,
+        "items": []
+    }
+
+    # 고객별 데이터를 임시로 저장할 딕셔너리 - 키는 (고객ID, 결제시간)
+    transaction_data = {}
+
+    # 해당 일자의 결제 정보 조회
+    payments = Payment.query.filter(
+        Payment.pay_time >= date_obj,
+        Payment.pay_time < next_day
+    ).all()
+
+    for payment in payments:
+        cart = db.session.get(Cart, payment.cart_id)
+        if not cart:
+            continue
+
+        # 고객 정보
+        customer = db.session.get(Customer, cart.customer_id)
+        customer_id = str(customer.customer_id) if customer else "Unknown"
+
+        # 결제 시간을 문자열로 변환 (시간까지만 정확하게 사용)
+        pay_time_str = payment.pay_time.strftime('%Y-%m-%d %H:%M:%S')
+
+        # 트랜잭션 키 생성: 고객 ID + 결제 시간
+        transaction_key = f"{customer_id}{pay_time_str}"
+
+        # 해당 트랜잭션이 아직 없으면 초기화
+        if transaction_key not in transaction_data:
+            transaction_data[transaction_key] = {
+                "customer_id": customer_id,
+                "pay_time": pay_time_str,
+                "amount": 0,
+                "products": []
+            }
+
+        # 장바구니 상품 - 그룹화하여 중복 줄이기
+        cart_items_query = db.session.query(
+            CartItems.product_name,
+            func.count(CartItems.product_name).label('count')
+        ).filter(
+            CartItems.cart_id == cart.cart_id
+        ).group_by(
+            CartItems.product_name
+        )
+
+        # 각 상품별로 정보 추가
+        for item_info in cart_items_query:
+            product_name, count = item_info
+            product = db.session.get(Product, product_name)
+            if not product:
+                continue
+
+            # 상품 정보 및 금액 추가
+            item_amount = product.product_price * count
+            transaction_data[transaction_key]["amount"] += item_amount
+            transaction_data[transaction_key]["products"].append({
+                "이름": product_name,
+                "가격": product.product_price,
+                "수량": count,
+                "소계": item_amount
+            })
+
+    # 트랜잭션 데이터를 결과 항목으로 변환
+    for transaction_key, data in transaction_data.items():
+        result["items"].append({
+            "amount": data["amount"],
+            "description": f"고객 {data['customer_id']} 구매",
+            "details": {
+                "고객 ID": data["customer_id"],
+                "상품 내역": data["products"],
+                "시간": data["pay_time"]
+            }
+        })
+
+    # 캐시 저장
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(result, f)
+    except Exception as e:
+        print(f"캐시 저장 오류: {str(e)}")
+
+    response = jsonify(result)
+    response.headers['Cache-Control'] = 'public, max-age=86400'  # 24시간 캐싱
+    return response
+
+
+#================================상우=========================================
 
 
 
