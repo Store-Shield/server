@@ -6,6 +6,8 @@ import os
 from flask_socketio import SocketIO, emit
 import threading
 from flask_sqlalchemy import SQLAlchemy
+from flask import send_file  # 이 라인이 파일 상단에 있어야 합니다
+
 from datetime import datetime, date
 import time
 from sqlalchemy import func, and_, or_
@@ -22,6 +24,10 @@ recording_active = False
 frame_buffer = []  # 프레임과 타임스탬프 저장
 active_persons = set()
 
+
+
+
+
 # 영상 저장 함수 정의
 def save_person_video(person_id):
     if not frame_buffer:
@@ -30,7 +36,7 @@ def save_person_video(person_id):
 
     folder = 'videos'
     os.makedirs(folder, exist_ok=True)
-    filename = f"{folder}/person_{person_id}_{int(time.time())}.mp4"
+    filename = f"{folder}/person_{person_id}.mp4"
 
     height, width, _ = frame_buffer[0]['image'].shape
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -635,6 +641,291 @@ def handle_message(message):
 
     except Exception as e:
         print(f"웹소켓 처리 오류: {str(e)}")
+
+
+
+
+
+
+
+
+#=========================    hyechang code ============================
+
+@app.route('/download_video/<int:person_id>', methods=['GET'])
+def download_video(person_id):
+    try:
+        # 영상 파일 경로
+        video_path = f"videos/person_{person_id}.mp4"
+        
+        # 파일이 존재하는지 확인
+        if os.path.exists(video_path):
+            # 다운로드를 위해 파일 전송
+            return send_file(video_path, 
+                            mimetype='video/mp4',
+                            as_attachment=True, 
+                            download_name=f"suspect_{person_id}.mp4")
+        else:
+            return jsonify({"error": "영상 파일을 찾을 수 없습니다."}), 404
+    except Exception as e:
+        print(f"영상 다운로드 오류: {str(e)}")
+        return jsonify({"error": f"영상 다운로드 중 오류가 발생했습니다: {str(e)}"}), 500
+    
+
+
+
+
+
+stock_lack_count=5; #서버에서 관리 현도랑 이름 맞춰야함함
+
+# 현재 날짜의 시작과 끝 시간을 반환하는 헬퍼 함수
+def get_today_range():
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
+    return today_start, today_end
+
+# 테스트를 위한!!!! 2024년의 특정 날짜를 사용
+def get_fixed_date_range():
+    fixed_date = datetime(2023, 12, 31).date()
+    day_start = datetime.combine(fixed_date, datetime.min.time())
+    day_end = datetime.combine(fixed_date, datetime.max.time())
+    return day_start, day_end  # 2개 반환
+# 플러터 앱의 페이지 로드 요청 처리
+@socketio.on('hyechangPageload')
+def handle_hyechang_pageload(data):
+    try:
+        page_type = data.get('pageType')
+        
+        if page_type == "mainPage":
+            # 메인 페이지 데이터 로드
+            handle_main_page_data()
+        elif page_type == "alertPage":
+            # 알림 페이지 데이터 로드 (연도별 용의자 및 재고 알림)
+            
+            year = data.get('year', datetime.now().year)  # 요청된 연도 또는 현재 연도
+            print(year,end=" ")
+            print("년도 절도 요청")
+             # 재고 부족 기준 (기본값 5) 서버에서 관리
+            handle_alert_page_data(year, stock_lack_count)
+    except Exception as e:
+        print(f"페이지 데이터 처리 오류: {str(e)}")
+        emit('error', {'message': str(e)})
+
+# 메인 페이지 데이터 처리
+def handle_main_page_data():
+    try:
+        # 날짜 범위
+        today_start, today_end = get_fixed_date_range()
+        
+        # 1. 일일 고객 수 조회
+        daily_customer_count = Customer.query.filter(
+            and_(
+                Customer.come_in >= today_start,
+                Customer.come_in <= today_end
+            )
+        ).count()
+        
+        # 2. 일일 도난 의심 고객 수 조회
+        daily_suspect_count = Customer.query.filter(
+            and_(
+                Customer.come_in >= today_start,
+                Customer.come_in <= today_end,
+                Customer.cal_state == '절도의심'
+            )
+        ).count()
+        
+        # 3. 일일 매출액 조회
+        daily_sales = 0.0
+        
+        # 오늘 날짜의 결제 건 조회
+        today_payments = Payment.query.filter(
+            and_(
+                Payment.pay_time >= today_start,
+                Payment.pay_time <= today_end
+            )
+        ).all()
+        
+        # 결제 건에 해당하는 카트의 총액 합산
+        cart_ids = [payment.cart_id for payment in today_payments]
+        if cart_ids:
+            cart_totals = db.session.query(func.sum(Cart.total_price)).filter(
+                Cart.cart_id.in_(cart_ids)
+            ).scalar()
+            
+            if cart_totals is not None:
+                daily_sales = float(cart_totals)
+        
+        # 4. 인기 상품 조회
+        # 일별 인기 상품 (DaySales 테이블)
+        # 월별 인기 상품 (MonthSales 테이블)
+
+
+        # 테스트를 위해 고정!!
+        # 실제 코드 나중에는 이것을 써야함!! =============================
+        # today_str = date.today().strftime('%Y-%m-%d')
+        # daily_popular = DaySales.query.filter_by(day=today_str).order_by(
+        #     DaySales.count.desc()
+        # ).limit(3).all()
+        
+        # daily_products = [{'product_name': item.product_name, 'count': item.count} for item in daily_popular]     
+       
+        # current_month = date.today().strftime('%Y-%m')
+        # monthly_popular = MonthSales.query.filter_by(month=current_month).order_by(
+        #     MonthSales.count.desc()
+        # ).limit(3).all()
+        
+        # monthly_products = [{'product_name': item.product_name, 'count': item.count} for item in monthly_popular]
+        
+        # # 연별 인기 상품 (YearSales 테이블)
+        # current_year = date.today().year
+        # yearly_popular = YearSales.query.filter_by(year=current_year).order_by(
+        #     YearSales.count.desc()
+        # ).limit(3).all()
+
+        #yearly_products = [{'product_name': item.product_name, 'count': item.count} for item in yearly_popular]
+        #===============================
+
+        #test data================================
+        # 4. 인기 상품 조회
+        # fixed_date로부터 형식에 맞는 문자열 생성
+        fixed_day_str = datetime(2023, 12, 31).strftime('%Y-%m-%d')  # '2023-12-31'
+        fixed_month_str = datetime(2023, 12, 31).strftime('%Y-%m')   # '2023-12'
+        fixed_year = 2023
+
+        # 일별 인기 상품 (DaySales 테이블)
+        daily_popular = DaySales.query.filter_by(day=fixed_day_str).order_by(
+            DaySales.count.desc()
+        ).limit(3).all()
+        daily_products = [{'product_name': item.product_name, 'count': item.count} for item in daily_popular]  
+
+        # 월별 인기 상품 (MonthSales 테이블)
+        monthly_popular = MonthSales.query.filter_by(month=fixed_month_str).order_by(
+            MonthSales.count.desc()
+        ).limit(3).all()
+        monthly_products = [{'product_name': item.product_name, 'count': item.count} for item in monthly_popular]
+
+        # 연별 인기 상품 (YearSales 테이블)
+        yearly_popular = YearSales.query.filter_by(year=fixed_year).order_by(
+            YearSales.count.desc()
+        ).limit(3).all()        
+        yearly_products = [{'product_name': item.product_name, 'count': item.count} for item in yearly_popular]
+
+        #test data================================
+        
+        # 응답 데이터 구성 - 앱에서 요구하는 정확한 키 이름으로 맞춤
+        response_data = {
+            'daily_customer_count': daily_customer_count,
+            'daily_suspect_count': daily_suspect_count,
+            'daily_sales': daily_sales,
+            'popular_products': {
+                'daily': daily_products,
+                'monthly': monthly_products,
+                'yearly': yearly_products
+            }
+        }
+        
+        # 데이터 전송
+        emit('mainPageResult', response_data)
+        print(f"메인 페이지 데이터 전송 완료: {response_data}")
+        
+    except Exception as e:
+        print(f"메인 페이지 데이터 처리 오류: {str(e)}")
+        emit('mainPageResult', {'error': str(e)})
+
+# 알림 페이지 데이터 처리
+def handle_alert_page_data(year, stock_lack_count):
+    try:
+        # 1. 요청된 연도의 도난 의심 고객 데이터 조회
+        year_start = f"{year}-01-01 00:00:00"
+        year_end = f"{year}-12-31 23:59:59"
+        
+        suspects = Customer.query.filter(
+            and_(
+                Customer.come_in >= year_start,
+                Customer.come_in <= year_end,
+                Customer.cal_state == '절도의심'
+            )
+        ).all()
+        
+        suspect_list = []
+        for suspect in suspects:
+            try:
+                # 고객별 카트 조회
+                cart = Cart.query.filter_by(customer_id=suspect.customer_id).first()
+                
+                if cart:
+                    # 카트에 담긴 제품 및 수량 조회
+                    cart_items_grouped = db.session.query(
+                        CartItems.product_name, 
+                        func.count(CartItems.product_name).label('count')
+                    ).filter(
+                        CartItems.cart_id == cart.cart_id
+                    ).group_by(
+                        CartItems.product_name
+                    ).all()
+                    
+                    # 담긴 제품과 이미지 정보
+                    stolen_items = {}
+                    stolen_item_images = {}
+                    
+                    for product_name, count in cart_items_grouped:
+                        stolen_items[product_name] = count
+                        
+                        # 제품 이미지 정보 가져오기
+                        product = Product.query.filter_by(product_name=product_name).first()
+                        if product and product.product_image:
+                            stolen_item_images[product_name] = product.product_image
+                
+                # 고객 정보 구성
+                suspect_data = {
+                    'customer_id': suspect.customer_id,
+                    'come_in': suspect.come_in.strftime('%Y-%m-%dT%H:%M:%S') if suspect.come_in else None,
+                    'come_out': suspect.come_out.strftime('%Y-%m-%dT%H:%M:%S') if suspect.come_out else None,
+                    'cal_state': suspect.cal_state,
+                    'customer_image': suspect.customer_image,
+                    'video_thumbnail': suspect.video_thumbnail,
+                    'stolen_items': stolen_items,
+                    'stolen_item_images': stolen_item_images
+                }
+                
+                suspect_list.append(suspect_data)
+            
+            except Exception as e:
+                print(f"용의자 데이터 처리 오류 (ID: {suspect.customer_id}): {str(e)}")
+        
+        # 용의자 데이터 전송
+        emit('suspect_data', suspect_list)
+        
+        # 2. 재고 부족 제품 조회
+        stock_alerts = Product.query.filter(
+            Product.product_stock < stock_lack_count
+        ).all()
+        
+        stock_alert_list = []
+        for item in stock_alerts:
+            stock_alert_list.append({
+                'id': len(stock_alert_list) + 1,  # 순차적인 ID 부여
+                'product_name': item.product_name,
+                'product_stock': item.product_stock,
+                'min_stock': stock_lack_count,
+                'product_image': item.product_image
+            })
+        
+        # 재고 알림 데이터 전송
+        emit('stock_data', stock_alert_list)
+        
+    except Exception as e:
+        print(f"알림 페이지 데이터 처리 오류: {str(e)}")
+        emit('suspect_data', [])
+        emit('stock_data', [])
+
+
+#=========================    hyechang code ============================
+
+
+
+
+
 
 if __name__ == '__main__':
     with app.app_context():
