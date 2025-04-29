@@ -19,6 +19,10 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 current_image = None
 base64_image = None
 
+#재고 부족 기준 개수 초기값 전역변수
+inventory_threshold = 5
+
+
 
 # 영상 저장을 위한 변수 추가
 recording_active = False
@@ -589,7 +593,7 @@ def handle_message(message):
             if(product_name=="cup"):
                 product_name="컵"
             elif(product_name=="banana"):
-                product_name="바나나나"
+                product_name="바나나"
             elif(product_name=="apple"):
                 product_name="사과"
             # 제품이 존재하는지 확인
@@ -676,7 +680,6 @@ def download_video(person_id):
 
 
 
-stock_lack_count=5; #서버에서 관리 현도랑 이름 맞춰야함함
 
 # 현재 날짜의 시작과 끝 시간을 반환하는 헬퍼 함수
 def get_today_range():
@@ -707,7 +710,7 @@ def handle_hyechang_pageload(data):
             print(year,end=" ")
             print("년도 절도 요청")
              # 재고 부족 기준 (기본값 5) 서버에서 관리
-            handle_alert_page_data(year, stock_lack_count)
+            handle_alert_page_data(year, inventory_threshold)
     except Exception as e:
         print(f"페이지 데이터 처리 오류: {str(e)}")
         emit('error', {'message': str(e)})
@@ -716,7 +719,7 @@ def handle_hyechang_pageload(data):
 def handle_main_page_data():
     try:
         # 날짜 범위
-        today_start, today_end = get_fixed_date_range()
+        today_start, today_end = get_today_range()
         
         # 1. 일일 고객 수 조회
         daily_customer_count = Customer.query.filter(
@@ -763,53 +766,53 @@ def handle_main_page_data():
 
         # 테스트를 위해 고정!!
         # 실제 코드 나중에는 이것을 써야함!! =============================
-        # today_str = date.today().strftime('%Y-%m-%d')
-        # daily_popular = DaySales.query.filter_by(day=today_str).order_by(
-        #     DaySales.count.desc()
-        # ).limit(3).all()
+        today_str = date.today().strftime('%Y-%m-%d')
+        daily_popular = DaySales.query.filter_by(day=today_str).order_by(
+            DaySales.count.desc()
+        ).limit(3).all()
         
-        # daily_products = [{'product_name': item.product_name, 'count': item.count} for item in daily_popular]     
+        daily_products = [{'product_name': item.product_name, 'count': item.count} for item in daily_popular]     
        
-        # current_month = date.today().strftime('%Y-%m')
-        # monthly_popular = MonthSales.query.filter_by(month=current_month).order_by(
-        #     MonthSales.count.desc()
-        # ).limit(3).all()
+        current_month = date.today().strftime('%Y-%m')
+        monthly_popular = MonthSales.query.filter_by(month=current_month).order_by(
+            MonthSales.count.desc()
+        ).limit(3).all()
         
-        # monthly_products = [{'product_name': item.product_name, 'count': item.count} for item in monthly_popular]
+        monthly_products = [{'product_name': item.product_name, 'count': item.count} for item in monthly_popular]
         
-        # # 연별 인기 상품 (YearSales 테이블)
-        # current_year = date.today().year
-        # yearly_popular = YearSales.query.filter_by(year=current_year).order_by(
-        #     YearSales.count.desc()
-        # ).limit(3).all()
+        # 연별 인기 상품 (YearSales 테이블)
+        current_year = date.today().year
+        yearly_popular = YearSales.query.filter_by(year=current_year).order_by(
+            YearSales.count.desc()
+        ).limit(3).all()
 
-        #yearly_products = [{'product_name': item.product_name, 'count': item.count} for item in yearly_popular]
+        yearly_products = [{'product_name': item.product_name, 'count': item.count} for item in yearly_popular]
         #===============================
 
         #test data================================
         # 4. 인기 상품 조회
         # fixed_date로부터 형식에 맞는 문자열 생성
-        fixed_day_str = datetime(2023, 12, 31).strftime('%Y-%m-%d')  # '2023-12-31'
-        fixed_month_str = datetime(2023, 12, 31).strftime('%Y-%m')   # '2023-12'
-        fixed_year = 2023
+        # fixed_day_str = datetime(2023, 12, 31).strftime('%Y-%m-%d')  # '2023-12-31'
+        # fixed_month_str = datetime(2023, 12, 31).strftime('%Y-%m')   # '2023-12'
+        # fixed_year = 2023
 
-        # 일별 인기 상품 (DaySales 테이블)
-        daily_popular = DaySales.query.filter_by(day=fixed_day_str).order_by(
-            DaySales.count.desc()
-        ).limit(3).all()
-        daily_products = [{'product_name': item.product_name, 'count': item.count} for item in daily_popular]  
+        # # 일별 인기 상품 (DaySales 테이블)
+        # daily_popular = DaySales.query.filter_by(day=fixed_day_str).order_by(
+        #     DaySales.count.desc()
+        # ).limit(3).all()
+        # daily_products = [{'product_name': item.product_name, 'count': item.count} for item in daily_popular]  
 
-        # 월별 인기 상품 (MonthSales 테이블)
-        monthly_popular = MonthSales.query.filter_by(month=fixed_month_str).order_by(
-            MonthSales.count.desc()
-        ).limit(3).all()
-        monthly_products = [{'product_name': item.product_name, 'count': item.count} for item in monthly_popular]
+        # # 월별 인기 상품 (MonthSales 테이블)
+        # monthly_popular = MonthSales.query.filter_by(month=fixed_month_str).order_by(
+        #     MonthSales.count.desc()
+        # ).limit(3).all()
+        # monthly_products = [{'product_name': item.product_name, 'count': item.count} for item in monthly_popular]
 
-        # 연별 인기 상품 (YearSales 테이블)
-        yearly_popular = YearSales.query.filter_by(year=fixed_year).order_by(
-            YearSales.count.desc()
-        ).limit(3).all()        
-        yearly_products = [{'product_name': item.product_name, 'count': item.count} for item in yearly_popular]
+        # # 연별 인기 상품 (YearSales 테이블)
+        # yearly_popular = YearSales.query.filter_by(year=fixed_year).order_by(
+        #     YearSales.count.desc()
+        # ).limit(3).all()        
+        # yearly_products = [{'product_name': item.product_name, 'count': item.count} for item in yearly_popular]
 
         #test data================================
         
@@ -926,192 +929,406 @@ def handle_alert_page_data(year, stock_lack_count):
 
 
 #================================상우=========================================
-os.makedirs('cache', exist_ok=True)
 
-@app.route('/api/sales/<int:year>/<int:month>', methods=['GET'])
-def get_monthly_sales(year, month):
-    """월별 매출 요약 정보만 반환하는 API (날짜별 총액)"""
-    
-    # 캐시 키 생성
-    cache_key = f"sales_summary_{year}_{month}"
-    
-    # 1. 파일 캐시 확인
-    cache_file = f"cache/{cache_key}.json"
+
+@socketio.on('get_monthly_sales')
+def handle_monthly_sales(data):
+    """월별 매출 요약 정보를 웹소켓으로 반환하는 핸들러"""
     try:
-        if os.path.exists(cache_file):
-            with open(cache_file, 'r') as f:
-                return jsonify(json.load(f))
-    except Exception as e:
-        print(f"캐시 로드 오류: {str(e)}")
+        # 데이터에서 연도와 월 추출
+        year = data.get('year')
+        month = data.get('month')
         
-    # 2. 현재 월만 조회
-    start_date = datetime(year, month, 1)
-    if month == 12:
-        end_date = datetime(year+1, 1, 1) - timedelta(seconds=1)
-    else:
-        end_date = datetime(year, month+1, 1) - timedelta(seconds=1)
-    
-    # 3. 최적화된 쿼리: 날짜별 총액만 GROUP BY로 가져오기
-    sales_by_date = db.session.query(
-        func.date(Payment.pay_time).label('date'),
-        func.sum(Cart.total_price).label('total')
-    ).join(
-        Cart, Payment.cart_id == Cart.cart_id
-    ).filter(
-        Payment.pay_time.between(start_date, end_date)
-    ).group_by(
-        func.date(Payment.pay_time)
-    ).all()
-    
-    result = {}
-    
-    # 결과 데이터 구성 - 상세 항목 없이 총액만
-    for date, total in sales_by_date:
-        date_str = date.strftime('%Y-%m-%d')
-        result[date_str] = {
-            "total": float(total) if total else 0
-        }
-    
-    # 캐시 저장
-    try:
-        with open(cache_file, 'w') as f:
-            json.dump(result, f)
-    except Exception as e:
-        print(f"캐시 저장 오류: {str(e)}")
+        if not year or not month:
+            emit('monthly_sales_result', {'error': '연도와 월 정보가 필요합니다.'})
+            return
+      
         
-    response = jsonify(result)
-    response.headers['Cache-Control'] = 'public, max-age=86400'  # 24시간 캐싱
-    return response
-
-@app.route('/api/sales/day/<string:date_str>', methods=['GET'])
-def get_daily_sales_detail(date_str):
-    """특정 날짜의 상세 매출 정보를 반환하는 API (고객 ID + 결제 시간별로 묶음)"""
-
-    # 캐시 키 생성
-    cache_key = f"salesdetail{date_str}"
-
-    # 1. 파일 캐시 확인
-    cache_file = f"cache/{cache_key}.json"
-    try:
-        if os.path.exists(cache_file):
-            with open(cache_file, 'r') as f:
-                return jsonify(json.load(f))
-    except Exception as e:
-        print(f"캐시 로드 오류: {str(e)}")
-
-    try:
-        # 날짜 문자열 파싱 (YYYY-MM-DD 형식)
-        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-        next_day = date_obj + timedelta(days=1)
-    except ValueError:
-        return jsonify({"error": "잘못된 날짜 형식. YYYY-MM-DD 형식이어야 합니다."}), 400
-
-    # 해당 날짜의 총액 계산
-    total_sales = db.session.query(
-        func.sum(Cart.total_price).label('total')
-    ).join(
-        Payment, Payment.cart_id == Cart.cart_id
-    ).filter(
-        Payment.pay_time >= date_obj,
-        Payment.pay_time < next_day
-    ).scalar()
-
-    # 결과 데이터 구조 초기화
-    result = {
-        "total": float(total_sales) if total_sales else 0,
-        "items": []
-    }
-
-    # 고객별 데이터를 임시로 저장할 딕셔너리 - 키는 (고객ID, 결제시간)
-    transaction_data = {}
-
-    # 해당 일자의 결제 정보 조회
-    payments = Payment.query.filter(
-        Payment.pay_time >= date_obj,
-        Payment.pay_time < next_day
-    ).all()
-
-    for payment in payments:
-        cart = db.session.get(Cart, payment.cart_id)
-        if not cart:
-            continue
-
-        # 고객 정보
-        customer = db.session.get(Customer, cart.customer_id)
-        customer_id = str(customer.customer_id) if customer else "Unknown"
-
-        # 결제 시간을 문자열로 변환 (시간까지만 정확하게 사용)
-        pay_time_str = payment.pay_time.strftime('%Y-%m-%d %H:%M:%S')
-
-        # 트랜잭션 키 생성: 고객 ID + 결제 시간
-        transaction_key = f"{customer_id}{pay_time_str}"
-
-        # 해당 트랜잭션이 아직 없으면 초기화
-        if transaction_key not in transaction_data:
-            transaction_data[transaction_key] = {
-                "customer_id": customer_id,
-                "pay_time": pay_time_str,
-                "amount": 0,
-                "products": []
-            }
-
-        # 장바구니 상품 - 그룹화하여 중복 줄이기
-        cart_items_query = db.session.query(
-            CartItems.product_name,
-            func.count(CartItems.product_name).label('count')
+        # 2. 현재 월만 조회
+        start_date = datetime(year, month, 1)
+        if month == 12:
+            end_date = datetime(year+1, 1, 1) - timedelta(seconds=1)
+        else:
+            end_date = datetime(year, month+1, 1) - timedelta(seconds=1)
+        
+        # 3. 최적화된 쿼리: 날짜별 총액만 GROUP BY로 가져오기
+        sales_by_date = db.session.query(
+            func.date(Payment.pay_time).label('date'),
+            func.sum(Cart.total_price).label('total')
+        ).join(
+            Cart, Payment.cart_id == Cart.cart_id
         ).filter(
-            CartItems.cart_id == cart.cart_id
+            Payment.pay_time.between(start_date, end_date)
         ).group_by(
-            CartItems.product_name
-        )
+            func.date(Payment.pay_time)
+        ).all()
+        
+        result = {}
+        
+        # 결과 데이터 구성 - 상세 항목 없이 총액만
+        for date, total in sales_by_date:
+            date_str = date.strftime('%Y-%m-%d')
+            result[date_str] = {
+                "total": float(total) if total else 0
+            }
+        
+        
+        
+        emit('monthly_sales_result', result)
+        
+    except Exception as e:
+        print(f"월별 매출 조회 오류: {str(e)}")
+        emit('monthly_sales_result', {'error': str(e)})
 
-        # 각 상품별로 정보 추가
-        for item_info in cart_items_query:
-            product_name, count = item_info
-            product = db.session.get(Product, product_name)
-            if not product:
+# 일별 매출 상세 정보 조회 이벤트 핸들러
+@socketio.on('get_daily_sales_detail')
+def handle_daily_sales_detail(data):
+    """특정 날짜의 상세 매출 정보를 웹소켓으로 반환하는 핸들러"""
+    try:
+        # 데이터에서 날짜 추출
+        date_str = data.get('date')
+        
+        if not date_str:
+            emit('daily_sales_result', {'error': '날짜 정보가 필요합니다.'})
+            return
+        
+        
+       
+
+        try:
+            # 날짜 문자열 파싱 (YYYY-MM-DD 형식)
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+            next_day = date_obj + timedelta(days=1)
+        except ValueError:
+            emit('daily_sales_result', {"error": "잘못된 날짜 형식. YYYY-MM-DD 형식이어야 합니다."})
+            return
+
+        # 해당 날짜의 총액 계산
+        total_sales = db.session.query(
+            func.sum(Cart.total_price).label('total')
+        ).join(
+            Payment, Payment.cart_id == Cart.cart_id
+        ).filter(
+            Payment.pay_time >= date_obj,
+            Payment.pay_time < next_day
+        ).scalar()
+
+        # 결과 데이터 구조 초기화
+        result = {
+            "total": float(total_sales) if total_sales else 0,
+            "items": []
+        }
+
+        # 고객별 데이터를 임시로 저장할 딕셔너리 - 키는 (고객ID, 결제시간)
+        transaction_data = {}
+
+        # 해당 일자의 결제 정보 조회
+        payments = Payment.query.filter(
+            Payment.pay_time >= date_obj,
+            Payment.pay_time < next_day
+        ).all()
+
+        for payment in payments:
+            cart = db.session.get(Cart, payment.cart_id)
+            if not cart:
                 continue
 
-            # 상품 정보 및 금액 추가
-            item_amount = product.product_price * count
-            transaction_data[transaction_key]["amount"] += item_amount
-            transaction_data[transaction_key]["products"].append({
-                "이름": product_name,
-                "가격": product.product_price,
-                "수량": count,
-                "소계": item_amount
+            # 고객 정보
+            customer = db.session.get(Customer, cart.customer_id)
+            customer_id = str(customer.customer_id) if customer else "Unknown"
+
+            # 결제 시간을 문자열로 변환 (시간까지만 정확하게 사용)
+            pay_time_str = payment.pay_time.strftime('%Y-%m-%d %H:%M:%S')
+
+            # 트랜잭션 키 생성: 고객 ID + 결제 시간
+            transaction_key = f"{customer_id}{pay_time_str}"
+
+            # 해당 트랜잭션이 아직 없으면 초기화
+            if transaction_key not in transaction_data:
+                transaction_data[transaction_key] = {
+                    "customer_id": customer_id,
+                    "pay_time": pay_time_str,
+                    "amount": 0,
+                    "products": []
+                }
+
+            # 장바구니 상품 - 그룹화하여 중복 줄이기
+            cart_items_query = db.session.query(
+                CartItems.product_name,
+                func.count(CartItems.product_name).label('count')
+            ).filter(
+                CartItems.cart_id == cart.cart_id
+            ).group_by(
+                CartItems.product_name
+            )
+
+            # 각 상품별로 정보 추가
+            for item_info in cart_items_query:
+                product_name, count = item_info
+                product = db.session.get(Product, product_name)
+                if not product:
+                    continue
+
+                # 상품 정보 및 금액 추가
+                item_amount = product.product_price * count
+                transaction_data[transaction_key]["amount"] += item_amount
+                transaction_data[transaction_key]["products"].append({
+                    "이름": product_name,
+                    "가격": product.product_price,
+                    "수량": count,
+                    "소계": item_amount
+                })
+
+        # 트랜잭션 데이터를 결과 항목으로 변환
+        for transaction_key, data in transaction_data.items():
+            result["items"].append({
+                "amount": data["amount"],
+                "description": f"고객 {data['customer_id']} 구매",
+                "details": {
+                    "고객 ID": data["customer_id"],
+                    "상품 내역": data["products"],
+                    "시간": data["pay_time"]
+                }
             })
 
-    # 트랜잭션 데이터를 결과 항목으로 변환
-    for transaction_key, data in transaction_data.items():
-        result["items"].append({
-            "amount": data["amount"],
-            "description": f"고객 {data['customer_id']} 구매",
-            "details": {
-                "고객 ID": data["customer_id"],
-                "상품 내역": data["products"],
-                "시간": data["pay_time"]
-            }
-        })
 
-    # 캐시 저장
-    try:
-        with open(cache_file, 'w') as f:
-            json.dump(result, f)
+        emit('daily_sales_result', result)
+        
     except Exception as e:
-        print(f"캐시 저장 오류: {str(e)}")
+        print(f"일별 매출 조회 오류: {str(e)}")
+        emit('daily_sales_result', {'error': str(e)})
 
-    response = jsonify(result)
-    response.headers['Cache-Control'] = 'public, max-age=86400'  # 24시간 캐싱
-    return response
+# 매출 페이지 데이터 로드 처리 (hyechangPageload 스타일과 유사)
+@socketio.on('salesPageload')
+def handle_sales_pageload(data):
+    try:
+        page_type = data.get('pageType')
+        
+        if page_type == "monthlySales":
+            # 월별 매출 데이터 로드
+            year = data.get('year', datetime.now().year)
+            month = data.get('month', datetime.now().month)
+            print(year,month)
+            handle_monthly_sales({'year': year, 'month': month})
+            
+        elif page_type == "dailySales":
+            # 일별 매출 데이터 로드
+            date_str = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+            handle_daily_sales_detail({'date': date_str})
+            print(year,date_str)
+            
+    except Exception as e:
+        print(f"매출 페이지 데이터 처리 오류: {str(e)}")
+        emit('error', {'message': str(e)})
 
 
 #================================상우=========================================
 
 
 
+#================================현도=========================================
 
 
+
+
+@socketio.on('get_inventory_threshold')
+def send_inventory_threshold():
+    emit('inventory_threshold_response', {'threshold': inventory_threshold})
+
+@socketio.on('set_inventory_threshold')
+def update_inventory_threshold(data):
+    global inventory_threshold
+    threshold = data.get('threshold')
+    if isinstance(threshold, int) and threshold > 0:
+        inventory_threshold = threshold
+        print(f"기준값이 {threshold}로 업데이트됨")
+
+
+@socketio.on('request_sales_data')
+def handle_sales_request(data):
+    period = data.get('period')
+
+    try:
+        if period == 'daily':
+            # 오늘부터 7일 전까지의 날짜 생성
+            end_date = date.today()
+            start_date = end_date - timedelta(days=6)  # 7일 전 (오늘 포함)
+            
+            # 각 날짜에 대한 데이터 조회
+            result = []
+            current_date = start_date
+            while current_date <= end_date:
+                date_str = current_date.strftime('%Y-%m-%d')
+                
+                # 해당 날짜의 매출 데이터 조회 - 명시적인 조인 조건 추가
+                day_sale = db.session.query(
+                    db.func.sum(Product.product_price * DaySales.count).label('total')
+                ).select_from(DaySales).join(
+                    Product, DaySales.product_name == Product.product_name
+                ).filter(DaySales.day == date_str).scalar() or 0
+                
+                result.append({
+                    'day': date_str,
+                    'total': float(day_sale)
+                })
+                
+                current_date += timedelta(days=1)
+            
+            # 날짜순으로 정렬
+            result.sort(key=lambda x: x['day'])
+            emit('daily_sales_data', result)
+            print(result)
+
+        elif period == 'monthly':
+            # 이번 달부터 6개월 전까지
+            today = date.today()
+            
+            result = []
+            for i in range(6, -1, -1):  # 6개월 전부터 현재 월까지
+                # i개월 전 날짜 계산
+                year = today.year
+                month = today.month - i
+                
+                # 월이 음수가 되면 연도 조정
+                while month <= 0:
+                    month += 12
+                    year -= 1
+                
+                month_str = f"{year}-{month:02d}"
+                
+                # 해당 월의 매출 데이터 조회 - 명시적인 조인 조건 추가
+                month_sale = db.session.query(
+                    db.func.sum(Product.product_price * MonthSales.count).label('total')
+                ).select_from(MonthSales).join(
+                    Product, MonthSales.product_name == Product.product_name
+                ).filter(MonthSales.month == month_str).scalar() or 0
+                
+                result.append({
+                    'month': month_str,
+                    'total': float(month_sale)
+                })
+            
+            emit('monthly_sales_data', result)
+
+        elif period == 'yearly':
+            # 올해부터 6년 전까지
+            current_year = date.today().year
+            
+            result = []
+            for year in range(current_year - 6, current_year + 1):
+                # 해당 연도의 매출 데이터 조회 - 명시적인 조인 조건 추가
+                year_sale = db.session.query(
+                    db.func.sum(Product.product_price * YearSales.count).label('total')
+                ).select_from(YearSales).join(
+                    Product, YearSales.product_name == Product.product_name
+                ).filter(YearSales.year == year).scalar() or 0
+                
+                result.append({
+                    'year': str(year),
+                    'total': float(year_sale)
+                })
+            
+            emit('yearly_sales_data', result)
+
+    except Exception as e:
+        print(f"매출 데이터 조회 오류: {str(e)}")
+        emit('sales_data_error', {'error': str(e)})
+
+
+#================================현도=========================================
+
+
+#================================선빈=========================================
+
+@socketio.on('get_products')
+def handle_get_products():
+    try:
+        # 1) DB에서 모든 Product 레코드 조회
+        products = Product.query.all()
+
+        # 2) to_dict()로 직렬화
+        data = [p.to_dict() for p in products]
+
+        # 3) 클라이언트에 'products' 이벤트로 전송
+        print("상품정보 전송송")
+        emit('products', data)
+    except Exception as e:
+        # 에러 발생 시 에러 메시지를 클라이언트에 전송
+        emit('products_error', {'error': str(e)})
+
+@socketio.on('delete_all_products')
+def handle_delete_all_products():
+    try:
+        # 모든 레코드 삭제
+        Product.query.delete()
+        db.session.commit()
+        # 삭제 성공 (페이로드 없이)
+        emit('delete_all_success')
+    except Exception as e:
+        db.session.rollback()
+        emit('delete_all_error', {'error': str(e)})
+
+@socketio.on('add_product')
+def handle_add_product(data):
+    print("add_product 선빈")
+    try:
+        product = Product(
+            product_name=data['product_name'],
+            product_price=data['product_price'],
+            product_stock=data['product_stock'],
+            product_image=data['product_image']  # already base64-encoded
+        )
+        db.session.add(product)
+        db.session.commit()
+        emit('add_success', {}, broadcast=False)
+    except Exception as e:
+        db.session.rollback()
+        emit('add_error', {'error': str(e)}, broadcast=False)
+
+@socketio.on('delete_product')
+def handle_delete_product(payload):
+    print("delete_product 선빈")
+
+    try:
+        name = payload.get('product_name')
+        product = Product.query.filter_by(product_name=name).first()
+        if not product:
+            emit('delete_error', {'error': 'Product not found.'})
+            return
+
+        db.session.delete(product)
+        db.session.commit()
+        emit('delete_success')
+    except Exception as e:
+        db.session.rollback()
+        emit('delete_error', {'error': str(e)})
+
+@socketio.on('update_product')
+def handle_update_product(payload):
+    print("update_product 선빈")
+    try:
+        name  = payload['product_name']
+        price = payload['product_price']
+        stock = payload['product_stock']
+        image = payload['product_image']  # base64 스트링
+
+        product = Product.query.filter_by(product_name=name).first()
+        if not product:
+            emit('update_error', {'error': 'Product not found.'})
+            return
+
+        # 필드 업데이트
+        product.product_price = price
+        product.product_stock = stock
+        product.product_image = image
+        db.session.commit()
+
+        emit('update_success')
+    except Exception as e:
+        db.session.rollback()
+        emit('update_error', {'error': str(e)})
+
+#================================선빈=========================================
 
 if __name__ == '__main__':
     with app.app_context():
