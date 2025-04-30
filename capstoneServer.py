@@ -902,7 +902,7 @@ def handle_alert_page_data(year, stock_lack_count):
         
         # 2. 재고 부족 제품 조회
         stock_alerts = Product.query.filter(
-            Product.product_stock < stock_lack_count
+            Product.product_stock <= stock_lack_count
         ).all()
         
         stock_alert_list = []
