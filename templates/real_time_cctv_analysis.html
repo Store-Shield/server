@@ -268,19 +268,38 @@
             transition: opacity 0.5s;
         }
         
+        /* 새로 추가된 다운로드 버튼 스타일 */
+        .download-button {
+            display: block;
+            background-color: #d32f2f;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-top: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            width: 100%;
+        }
+
+        .download-button:hover {
+            background-color: #b71c1c;
+        }
+
         @media (max-width: 900px) {
             .content-wrapper {
                 flex-direction: column;
             }
-            
+
             .cctv-container, .customers-container {
                 width: 100%;
             }
-            
+
             .cctv-container {
                 height: 40vh;
             }
-            
+
             .customers-container {
                 height: calc(60vh - 60px);
             }
@@ -301,7 +320,7 @@
         <div class="header">
             <h1>실시간 CCTV 분석 시스템</h1>
         </div>
-        
+
         <div class="content-wrapper">
             <div class="cctv-container">
                 <div class="cctv-label">CCTV</div>
@@ -309,7 +328,7 @@
                     <img id="cctv-image" src="" alt="CCTV 영상을 불러오는 중...">
                 </div>
             </div>
-            
+
             <div class="customers-container">
                 <div class="customers-list" id="customers-list">
                     <!-- 고객 카드가 여기에 동적으로 추가됩니다 -->
@@ -321,9 +340,9 @@
             </div>
         </div>
     </div>
-    
+
     <div class="connection-status" id="connection-status">연결 중...</div>
-    
+
     <script>
         // Socket.IO 연결
         const socket = io();
@@ -331,7 +350,7 @@
         const customersList = document.getElementById('customers-list');
         const noCustomersMessage = document.getElementById('no-customers');
         const connectionStatus = document.getElementById('connection-status');
-        
+
         // 연결 상태 관리
         socket.on('connect', () => {
             connectionStatus.textContent = '연결됨';
@@ -340,13 +359,13 @@
                 connectionStatus.style.opacity = '0';
             }, 3000);
         });
-        
+
         socket.on('disconnect', () => {
             connectionStatus.textContent = '연결 끊김';
             connectionStatus.style.backgroundColor = 'rgba(244, 67, 54, 0.8)';
             connectionStatus.style.opacity = '1';
         });
-        
+
         // 상태에 따른 스타일 클래스와 텍스트 반환
         function getStatusInfo(state) {
             switch(state) {
@@ -364,35 +383,35 @@
                     return { class: '', text: state, cardClass: '' };
             }
         }
-        
+
         // 고객 카드 HTML 생성
         function createCustomerCard(customer) {
             const statusInfo = getStatusInfo(customer.cal_state);
-            
+
             // 고객 이미지 HTML
             let customerImageHtml = `<div>${customer.customer_id}</div>`;
             if (customer.customer_image) {
                 customerImageHtml = `<img src="data:image/jpeg;base64,${customer.customer_image}" alt="고객 ID: ${customer.customer_id}">`;
             }
-            
+
             // 입장/퇴장 시간 포맷
             const comeInTime = customer.come_in ? new Date(customer.come_in).toLocaleTimeString() : '없음';
             const comeOutTime = customer.come_out ? new Date(customer.come_out).toLocaleTimeString() : '없음';
-            
+
             // 제품 목록 HTML 생성
             let productsHtml = '<p>장바구니가 비어있습니다</p>';
             let totalPrice = 0;
-            
+
             if (customer.cart_items && customer.cart_items.length > 0) {
                 productsHtml = customer.cart_items.map(item => {
                     totalPrice += item.subtotal;
-                    
+
                     // 제품 이미지 HTML
                     let productImageHtml = '🛒';
                     if (item.product_image) {
                         productImageHtml = `<img src="data:image/jpeg;base64,${item.product_image}" alt="${item.product_name}">`;
                     }
-                    
+
                     return `
                         <div class="product-item">
                             <div class="product-image">${productImageHtml}</div>
@@ -402,7 +421,17 @@
                     `;
                 }).join('');
             }
-            
+
+            // 절도 의심 상태인 경우 동영상 다운로드 버튼 추가
+            let downloadButtonHtml = '';
+            if (customer.cal_state === '절도의심') {
+                downloadButtonHtml = `
+                    <a href="/download_video/${customer.customer_id}" class="download-button">
+                        절도 의심 영상 다운로드
+                    </a>
+                `;
+            }
+
             return `
                 <div class="customer-card ${statusInfo.cardClass}" id="customer-${customer.customer_id}">
                     <div class="customer-header">
@@ -415,24 +444,25 @@
                             <span class="customer-status ${statusInfo.class}">${statusInfo.text}</span>
                         </div>
                     </div>
-                    
+
                     <div class="product-grid">
                         ${productsHtml}
                     </div>
-                    
+
                     <div class="total-price">총액: ${totalPrice.toLocaleString()}원</div>
+
+                    ${downloadButtonHtml}
                 </div>
             `;
         }
-        
+
         // 이미지 업데이트 처리 (서버에서 주기적으로 푸시)
         socket.on('image_update', (data) => {
-            
             if (data.image) {
                 cctvImage.src = `data:image/jpeg;base64,${data.image}`;
             }
         });
-        
+
         // 고객 데이터 업데이트 처리 (이벤트 발생 시 푸시)
         socket.on('customer_update', (data) => {
             console.log("customer_update호출")
@@ -440,21 +470,21 @@
                 // 고객이 있는지 확인
                 if (data.customers.length > 0) {
                     noCustomersMessage.style.display = 'none';
-                    
+
                     // 현재 표시된 고객 ID 목록
                     const currentCustomerIds = Array.from(
                         document.querySelectorAll('.customer-card')
                     ).map(card => parseInt(card.id.replace('customer-', '')));
-                    
+
                     // 기존 카드 제거
                     document.querySelectorAll('.customer-card').forEach(card => card.remove());
-                    
+
                     // 고객 카드 추가
                     data.customers.forEach(customer => {
                         const customerCard = document.createElement('div');
                         customerCard.innerHTML = createCustomerCard(customer);
                         customersList.appendChild(customerCard.firstElementChild);
-                        
+
                         // 새로 추가된 고객은 하이라이트 효과
                         if (!currentCustomerIds.includes(customer.customer_id)) {
                             const card = document.getElementById(`customer-${customer.customer_id}`);
@@ -470,32 +500,30 @@
                 }
             }
         });
-        
+
         window.onload = function() {
-    try {
-        // 숨겨진 요소에서 데이터 가져오기
-        const dataElement = document.getElementById('initial-customers-data');
-        let initialCustomers = [];
-        
-        if (dataElement) {
-            // 텍스트 내용 파싱하기
-            initialCustomers = JSON.parse(dataElement.textContent);
-        }
-        
-        if (initialCustomers && initialCustomers.length > 0) {
-            noCustomersMessage.style.display = 'none';
-            initialCustomers.forEach(customer => {
-                const customerCard = document.createElement('div');
-                customerCard.innerHTML = createCustomerCard(customer);
-                customersList.appendChild(customerCard.firstElementChild);
-            });
-        }
-    } catch (error) {
-        console.error("고객 데이터 처리 오류:", error);
-    }
-};
+            try {
+                // 숨겨진 요소에서 데이터 가져오기
+                const dataElement = document.getElementById('initial-customers-data');
+                let initialCustomers = [];
+
+                if (dataElement) {
+                    // 텍스트 내용 파싱하기
+                    initialCustomers = JSON.parse(dataElement.textContent);
+                }
+
+                if (initialCustomers && initialCustomers.length > 0) {
+                    noCustomersMessage.style.display = 'none';
+                    initialCustomers.forEach(customer => {
+                        const customerCard = document.createElement('div');
+                        customerCard.innerHTML = createCustomerCard(customer);
+                        customersList.appendChild(customerCard.firstElementChild);
+                    });
+                }
+            } catch (error) {
+                console.error("고객 데이터 처리 오류:", error);
+            }
+        };
     </script>
-
-
 </body>
 </html>
